@@ -7,6 +7,7 @@ namespace Mega;
 use Http\Discovery\Psr17FactoryDiscovery;
 use Http\Discovery\Psr18ClientDiscovery;
 use Mega\Transport\Connector;
+use Mega\Transport\Downloader;
 use Mega\Transport\SessionCache;
 use Psr\Cache\CacheItemPoolInterface;
 use Psr\Http\Client\ClientInterface;
@@ -100,10 +101,12 @@ class ClientFactory
             $this->logger
         );
 
+        $downloader = new Downloader($httpClient, $requestFactory);
+
         $sessionCache = $this->cachePool !== null
             ? new SessionCache($this->cachePool)
             : null;
 
-        return new Client($connector, $this->logger, $sessionCache);
+        return new Client($connector, $downloader, $this->logger, $sessionCache);
     }
 }

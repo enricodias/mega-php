@@ -4,16 +4,21 @@ declare(strict_types=1);
 
 namespace Mega;
 
-use Mega\Crypto\Aes;
 use Mega\Crypto\A32;
+use Mega\Crypto\Aes;
+use Mega\Crypto\Attr;
 use Mega\Crypto\Base64Url;
+use Mega\Crypto\NodeKey;
 use Mega\Crypto\Rsa;
 use Mega\Entity\FileInfo;
 use Mega\Entity\Node;
 use Mega\Entity\Session;
 use Mega\Entity\TransferResult;
 use Mega\Exception\AuthException;
+use Mega\Exception\CryptoException;
+use Mega\Exception\HttpException;
 use Mega\Transport\Connector;
+use Mega\Transport\Downloader;
 use Mega\Transport\SessionCache;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
@@ -27,6 +32,11 @@ class Client
      * @var Connector
      */
     private $connector;
+
+    /**
+     * @var Downloader
+     */
+    private $downloader;
 
     /**
      * @var LoggerInterface
@@ -45,11 +55,13 @@ class Client
 
     public function __construct(
         Connector $connector,
+        Downloader $downloader,
         ?LoggerInterface $logger = null,
         ?SessionCache $sessionCache = null
     ) {
         $this->connector = $connector;
-        $this->logger  = $logger !== null ? $logger : new NullLogger();
+        $this->downloader = $downloader;
+        $this->logger = $logger !== null ? $logger : new NullLogger();
         $this->sessionCache = $sessionCache;
         $this->session = null;
     }
@@ -62,7 +74,7 @@ class Client
      *
      * @throws AuthException
      * @throws \Mega\Exception\ApiException
-     * @throws \Mega\Exception\HttpException
+     * @throws HttpException
      */
     public function login(string $email, string $password): Session
     {
@@ -122,16 +134,29 @@ class Client
      *
      * @throws \Mega\Exception\InvalidLinkException
      * @throws \Mega\Exception\ApiException
-     * @throws \Mega\Exception\HttpException
+     * @throws HttpException
+     * @throws CryptoException
      */
     public function getPublicFileInfo(string $link): FileInfo
     {
-        throw new \BadMethodCallException('Not implemented');
+        $parsed = PublicLink::parse($link);
+
+        $this->logger->info('Requesting public file info', ['handle' => $parsed->getHandle()]);
+
+        $response = $this->connector->send([
+            'a'   => 'g',
+            'p'   => $parsed->getHandle(),
+            'g'   => 0,
+            'ssl' => 1,
+        ]);
+
+        return $this->buildFileInfoFromPublicResponse($response, $parsed->getKey());
     }
 
     /**
-     * Download a public file. Returns file content as a string when $destination is null,
-     * or the number of bytes written when a stream resource is given.
+     * Download a public file. Returns decrypted file content as a string when
+     * $destination is null, or the number of bytes written when a writable
+     * stream resource is given.
      *
      * @param string        $link
      * @param resource|null $destination
@@ -140,12 +165,36 @@ class Client
      *
      * @throws \Mega\Exception\InvalidLinkException
      * @throws \Mega\Exception\ApiException
-     * @throws \Mega\Exception\HttpException
-     * @throws \Mega\Exception\CryptoException
+     * @throws HttpException
+     * @throws CryptoException
      */
     public function downloadPublicFile(string $link, $destination = null)
     {
-        throw new \BadMethodCallException('Not implemented');
+        $parsed = PublicLink::parse($link);
+
+        $this->logger->info('Downloading public file', ['handle' => $parsed->getHandle()]);
+
+        $response = $this->connector->send([
+            'a'   => 'g',
+            'p'   => $parsed->getHandle(),
+            'g'   => 1,
+            'ssl' => 1,
+        ]);
+
+        $downloadUrl = $response['g'] ?? null;
+        $size = $response['s'] ?? null;
+
+        if (!\is_string($downloadUrl) || !\is_int($size)) {
+            throw new CryptoException('Public file info response is missing download URL or size.');
+        }
+
+        $nodeKey = A32::fromBase64($parsed->getKey());
+
+        if ($destination !== null) {
+            return $this->downloader->download($downloadUrl, $size, $nodeKey, $destination);
+        }
+
+        return $this->downloader->downloadToString($downloadUrl, $size, $nodeKey);
     }
 
     /**
@@ -155,7 +204,7 @@ class Client
      *
      * @throws AuthException
      * @throws \Mega\Exception\ApiException
-     * @throws \Mega\Exception\HttpException
+     * @throws HttpException
      */
     public function listNodes(): array
     {
@@ -167,7 +216,7 @@ class Client
      *
      * @throws AuthException
      * @throws \Mega\Exception\ApiException
-     * @throws \Mega\Exception\HttpException
+     * @throws HttpException
      */
     public function getFileInfo(Node $node): FileInfo
     {
@@ -175,8 +224,9 @@ class Client
     }
 
     /**
-     * Download an authenticated file. Returns file content as a string when $destination is null,
-     * or the number of bytes written when a stream resource is given.
+     * Download an authenticated file. Returns decrypted file content as a
+     * string when $destination is null, or the number of bytes written when a
+     * writable stream resource is given.
      *
      * @param Node          $node
      * @param resource|null $destination
@@ -185,8 +235,8 @@ class Client
      *
      * @throws AuthException
      * @throws \Mega\Exception\ApiException
-     * @throws \Mega\Exception\HttpException
-     * @throws \Mega\Exception\CryptoException
+     * @throws HttpException
+     * @throws CryptoException
      */
     public function downloadFile(Node $node, $destination = null)
     {
@@ -202,8 +252,8 @@ class Client
      *
      * @throws AuthException
      * @throws \Mega\Exception\ApiException
-     * @throws \Mega\Exception\HttpException
-     * @throws \Mega\Exception\CryptoException
+     * @throws HttpException
+     * @throws CryptoException
      */
     public function uploadFile($source, string $parentHandle, ?string $name = null): TransferResult
     {
@@ -215,7 +265,7 @@ class Client
      *
      * @throws AuthException
      * @throws \Mega\Exception\ApiException
-     * @throws \Mega\Exception\HttpException
+     * @throws HttpException
      */
     public function deleteNode(string $handle): void
     {
@@ -227,11 +277,33 @@ class Client
      *
      * @throws AuthException
      * @throws \Mega\Exception\ApiException
-     * @throws \Mega\Exception\HttpException
+     * @throws HttpException
      */
     public function moveNode(string $handle, string $parentHandle): Node
     {
         throw new \BadMethodCallException('Not implemented');
+    }
+
+    /**
+     * @param array<string, mixed> $response
+     *
+     * @throws CryptoException
+     */
+    private function buildFileInfoFromPublicResponse(array $response, string $linkKey): FileInfo
+    {
+        $nodeKey = A32::fromBase64($linkKey);
+
+        $name = '';
+        if (\array_key_exists('at', $response)) {
+            $attrCiphertext = Base64Url::decode((string) $response['at']);
+            $attrs = Attr::decrypt($attrCiphertext, $nodeKey);
+            $name = (string) ($attrs['n'] ?? '');
+        }
+
+        $size = \array_key_exists('s', $response) ? (int) $response['s'] : 0;
+        $downloadUrl = \array_key_exists('g', $response) ? (string) $response['g'] : null;
+
+        return new FileInfo($name, $size, $downloadUrl !== '' ? $downloadUrl : null);
     }
 
     /**
