@@ -14,12 +14,14 @@ use Mega\Entity\FileInfo;
 use Mega\Entity\Node;
 use Mega\Entity\Session;
 use Mega\Entity\TransferResult;
+use Mega\Exception\ApiException;
 use Mega\Exception\AuthException;
 use Mega\Exception\CryptoException;
 use Mega\Exception\HttpException;
 use Mega\Transport\Connector;
 use Mega\Transport\Downloader;
 use Mega\Transport\SessionCache;
+use Mega\Transport\Uploader;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 
@@ -39,6 +41,11 @@ class Client
     private $downloader;
 
     /**
+     * @var Uploader
+     */
+    private $uploader;
+
+    /**
      * @var LoggerInterface
      */
     private $logger;
@@ -56,11 +63,13 @@ class Client
     public function __construct(
         Connector $connector,
         Downloader $downloader,
+        Uploader $uploader,
         ?LoggerInterface $logger = null,
         ?SessionCache $sessionCache = null
     ) {
         $this->connector = $connector;
         $this->downloader = $downloader;
+        $this->uploader = $uploader;
         $this->logger = $logger !== null ? $logger : new NullLogger();
         $this->sessionCache = $sessionCache;
         $this->session = null;
@@ -73,7 +82,7 @@ class Client
      * returned on a hit, avoiding a round-trip to the MEGA API.
      *
      * @throws AuthException
-     * @throws \Mega\Exception\ApiException
+     * @throws ApiException
      * @throws HttpException
      */
     public function login(string $email, string $password): Session
@@ -133,7 +142,7 @@ class Client
      * Retrieve metadata for a public file link without authentication.
      *
      * @throws \Mega\Exception\InvalidLinkException
-     * @throws \Mega\Exception\ApiException
+     * @throws ApiException
      * @throws HttpException
      * @throws CryptoException
      */
@@ -164,7 +173,7 @@ class Client
      * @return string|int
      *
      * @throws \Mega\Exception\InvalidLinkException
-     * @throws \Mega\Exception\ApiException
+     * @throws ApiException
      * @throws HttpException
      * @throws CryptoException
      */
@@ -206,7 +215,7 @@ class Client
      * @return Node[]
      *
      * @throws AuthException
-     * @throws \Mega\Exception\ApiException
+     * @throws ApiException
      * @throws HttpException
      */
     public function listNodes(): array
@@ -259,7 +268,7 @@ class Client
      * Retrieve metadata for an authenticated node.
      *
      * @throws AuthException
-     * @throws \Mega\Exception\ApiException
+     * @throws ApiException
      * @throws HttpException
      * @throws CryptoException
      */
@@ -293,7 +302,7 @@ class Client
      * @return string|int
      *
      * @throws AuthException
-     * @throws \Mega\Exception\ApiException
+     * @throws ApiException
      * @throws HttpException
      * @throws CryptoException
      */
@@ -330,25 +339,87 @@ class Client
     /**
      * Upload a file to the given parent node.
      *
+     * $source may be a readable stream resource or a local file path string.
+     * If $name is null and $source is a path, the basename of the path is used.
+     * If $name is null and $source is a stream, the name defaults to 'upload'.
+     *
      * @param string|resource $source
      * @param string          $parentHandle
      * @param string|null     $name
      *
      * @throws AuthException
-     * @throws \Mega\Exception\ApiException
+     * @throws ApiException
      * @throws HttpException
      * @throws CryptoException
+     * @throws \InvalidArgumentException
      */
-    public function uploadFile($source, string $parentHandle, ?string $name = null): TransferResult
+    public function uploadFile($source, string $parentHandle = '', ?string $name = null): TransferResult
     {
-        throw new \BadMethodCallException('Not implemented');
+        $this->requireSession();
+
+        list($stream, $size, $resolvedName) = $this->resolveSource($source, $name);
+
+        $this->logger->info('Uploading file', ['name' => $resolvedName, 'size' => $size, 'parent' => $parentHandle]);
+
+        $uploadResponse = $this->connector->send([
+            'a' => 'u',
+            's' => $size,
+        ]);
+
+        $uploadUrl = $uploadResponse['p'] ?? null;
+
+        if (!\is_string($uploadUrl) || $uploadUrl === '') {
+            throw new ApiException('Upload command did not return a valid upload URL.', 0);
+        }
+
+        $nodeKey = $this->generateNodeKey();
+
+        $completionToken = $this->uploader->upload($uploadUrl, $stream, $size, $nodeKey);
+
+        $masterKeyStr = A32::toString($this->session->getMasterKey());
+        $encryptedNodeKey = Aes::encryptKey($masterKeyStr, $nodeKey);
+        $encryptedNodeKeyB64 = A32::toBase64($encryptedNodeKey);
+
+        $attrCiphertext = Attr::encrypt(['n' => $resolvedName], $nodeKey);
+        $attrB64 = Base64Url::encode($attrCiphertext);
+
+        $nodeCreateResponse = $this->connector->send([
+            'a' => 'p',
+            't' => $parentHandle,
+            'n' => [
+                [
+                    'h' => $completionToken,
+                    't' => Node::TYPE_FILE,
+                    'a' => $attrB64,
+                    'k' => $encryptedNodeKeyB64,
+                ],
+            ],
+        ]);
+
+        $createdNodes = $nodeCreateResponse['f'] ?? [];
+
+        if (!\is_array($createdNodes) || \count($createdNodes) === 0) {
+            throw new ApiException('Node-create command returned no nodes.', 0);
+        }
+
+        $raw = $createdNodes[0];
+        $handle = (string) ($raw['h'] ?? '');
+
+        $node = new Node(
+            $handle,
+            Node::TYPE_FILE,
+            $resolvedName,
+            $encryptedNodeKeyB64
+        );
+
+        return new TransferResult($node);
     }
 
     /**
      * Delete a node by handle, including all sub-nodes.
      *
      * @throws AuthException
-     * @throws \Mega\Exception\ApiException
+     * @throws ApiException
      * @throws HttpException
      */
     public function deleteNode(string $handle): void
@@ -360,7 +431,7 @@ class Client
      * Move a node to a new parent.
      *
      * @throws AuthException
-     * @throws \Mega\Exception\ApiException
+     * @throws ApiException
      * @throws HttpException
      */
     public function moveNode(string $handle, string $parentHandle): Node
@@ -442,6 +513,79 @@ class Client
         }
 
         return new Node($handle, $type, $name, $rawKey);
+    }
+
+    /**
+     * Generate a fresh random 8-element a32 file node key.
+     *
+     * Full layout: [aes0^iv0, aes1^iv1, aes2^mac0, aes3^mac1, iv0, iv1, mac0, mac1]
+     * Initially mac0=mac1=0 (the Uploader writes the file MAC back into the key).
+     *
+     * @return array<int>
+     */
+    private function generateNodeKey(): array
+    {
+        $aes = [
+            \random_int(0, 0x7FFFFFFF),
+            \random_int(0, 0x7FFFFFFF),
+            \random_int(0, 0x7FFFFFFF),
+            \random_int(0, 0x7FFFFFFF),
+        ];
+        $iv = [
+            \random_int(0, 0x7FFFFFFF),
+            \random_int(0, 0x7FFFFFFF),
+        ];
+
+        return [
+            $aes[0] ^ $iv[0],
+            $aes[1] ^ $iv[1],
+            $aes[2],
+            $aes[3],
+            $iv[0],
+            $iv[1],
+            0,
+            0,
+        ];
+    }
+
+    /**
+     * Resolve $source to a stream resource, total size, and filename.
+     *
+     * @param string|resource $source
+     * @param string|null     $name
+     *
+     * @return array{0: resource, 1: int, 2: string}
+     *
+     * @throws \InvalidArgumentException
+     */
+    private function resolveSource($source, ?string $name): array
+    {
+        if (\is_string($source)) {
+            if (!\file_exists($source)) {
+                throw new \InvalidArgumentException(\sprintf('Source file does not exist: %s', $source));
+            }
+
+            $stream = \fopen($source, 'rb');
+
+            if ($stream === false) {
+                throw new \InvalidArgumentException(\sprintf('Cannot open source file for reading: %s', $source));
+            }
+
+            $size = (int) \filesize($source);
+            $resolvedName = $name ?? \basename($source);
+
+            return [$stream, $size, $resolvedName];
+        }
+
+        if (!\is_resource($source)) {
+            throw new \InvalidArgumentException('$source must be a file path string or a readable stream resource.');
+        }
+
+        $stat = \fstat($source);
+        $size = ($stat !== false && \array_key_exists('size', $stat)) ? (int) $stat['size'] : 0;
+        $resolvedName = $name ?? 'upload';
+
+        return [$source, $size, $resolvedName];
     }
 
     /**

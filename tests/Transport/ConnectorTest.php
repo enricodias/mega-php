@@ -9,6 +9,7 @@ use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Psr7\HttpFactory;
 use GuzzleHttp\Psr7\Response;
+use Mega\Config;
 use Mega\Exception\ApiException;
 use Mega\Exception\HttpException;
 use Mega\Transport\Connector;
@@ -141,7 +142,7 @@ class ConnectorTest extends TestCase
         $factory = new HttpFactory();
 
         return new Connector(
-            'https://g.api.mega.co.nz/',
+            Config::SERVER_GLOBAL,
             $httpClient,
             $factory,
             $factory,

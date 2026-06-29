@@ -9,6 +9,7 @@ use Http\Discovery\Psr18ClientDiscovery;
 use Mega\Transport\Connector;
 use Mega\Transport\Downloader;
 use Mega\Transport\SessionCache;
+use Mega\Transport\Uploader;
 use Psr\Cache\CacheItemPoolInterface;
 use Psr\Http\Client\ClientInterface;
 use Psr\Http\Message\RequestFactoryInterface;
@@ -102,11 +103,12 @@ class ClientFactory
         );
 
         $downloader = new Downloader($httpClient, $requestFactory);
+        $uploader = new Uploader($httpClient, $requestFactory, $streamFactory);
 
         $sessionCache = $this->cachePool !== null
             ? new SessionCache($this->cachePool)
             : null;
 
-        return new Client($connector, $downloader, $this->logger, $sessionCache);
+        return new Client($connector, $downloader, $uploader, $this->logger, $sessionCache);
     }
 }

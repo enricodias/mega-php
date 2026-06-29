@@ -10,18 +10,19 @@ use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Psr7\HttpFactory;
 use GuzzleHttp\Psr7\Response;
 use Mega\Client;
+use Mega\Config;
 use Mega\Crypto\A32;
 use Mega\Crypto\Aes;
 use Mega\Crypto\Attr;
 use Mega\Crypto\Base64Url;
 use Mega\Crypto\ChunkSizer;
 use Mega\Crypto\NodeKey;
-use Mega\Entity\FileInfo;
 use Mega\Entity\Node;
 use Mega\Entity\Session;
 use Mega\Exception\AuthException;
 use Mega\Transport\Connector;
 use Mega\Transport\Downloader;
+use Mega\Transport\Uploader;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\NullLogger;
 
@@ -400,7 +401,7 @@ class ClientAuthenticatedTest extends TestCase
         $apiHttpClient = new GuzzleClient(['handler' => $apiStack]);
 
         $connector = new Connector(
-            'https://g.api.mega.co.nz/',
+            Config::SERVER_GLOBAL,
             $apiHttpClient,
             $factory,
             $factory,
@@ -412,7 +413,8 @@ class ClientAuthenticatedTest extends TestCase
         $dlHttpClient = new GuzzleClient(['handler' => $dlStack]);
 
         $downloader = new Downloader($dlHttpClient, $factory);
+        $uploader = $this->createMock(Uploader::class);
 
-        return new Client($connector, $downloader, new NullLogger());
+        return new Client($connector, $downloader, $uploader, new NullLogger());
     }
 }

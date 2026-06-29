@@ -10,6 +10,7 @@ use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Psr7\HttpFactory;
 use GuzzleHttp\Psr7\Response;
 use Mega\Client;
+use Mega\Config;
 use Mega\Crypto\A32;
 use Mega\Crypto\Attr;
 use Mega\Crypto\Base64Url;
@@ -19,6 +20,7 @@ use Mega\Entity\FileInfo;
 use Mega\Exception\InvalidLinkException;
 use Mega\Transport\Connector;
 use Mega\Transport\Downloader;
+use Mega\Transport\Uploader;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\NullLogger;
 
@@ -195,7 +197,6 @@ class ClientPublicLinkTest extends TestCase
     ): Client {
         $factory = new HttpFactory();
 
-        // Connector stack: captures requests and returns the API response
         $apiMock = new MockHandler([new Response(200, [], $apiResponseBody)]);
         $apiStack = HandlerStack::create($apiMock);
         $apiStack->push(function (callable $handler) use (&$capturedApiRequests) {
@@ -207,20 +208,20 @@ class ClientPublicLinkTest extends TestCase
         $apiHttpClient = new GuzzleClient(['handler' => $apiStack]);
 
         $connector = new Connector(
-            'https://g.api.mega.co.nz/',
+            Config::SERVER_GLOBAL,
             $apiHttpClient,
             $factory,
             $factory,
             new NullLogger()
         );
 
-        // Downloader stack: returns the raw (encrypted) file body
         $dlMock  = new MockHandler([new Response(200, [], $downloadBody)]);
         $dlStack = HandlerStack::create($dlMock);
         $dlHttpClient = new GuzzleClient(['handler' => $dlStack]);
 
         $downloader = new Downloader($dlHttpClient, $factory);
+        $uploader = $this->createMock(Uploader::class);
 
-        return new Client($connector, $downloader, new NullLogger());
+        return new Client($connector, $downloader, $uploader, new NullLogger());
     }
 }
