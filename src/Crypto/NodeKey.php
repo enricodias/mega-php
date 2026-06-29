@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Mega\Crypto;
 
+use Mega\Exception\CryptoException;
+
 /**
  * Node key helpers.
  *
@@ -48,6 +50,8 @@ class NodeKey
      * @param string $masterKeyStr 16-byte master key as a raw string
      *
      * @return array<int> Decrypted a32 node key (4 or 8 elements)
+     *
+     * @throws CryptoException
      */
     public static function decryptNodeKey(string $rawKey, string $masterKeyStr): array
     {
@@ -55,7 +59,18 @@ class NodeKey
         $parts = \explode(':', $firstSegment, 2);
         $encKey = $parts[1] ?? '';
 
+        if ($encKey === '') {
+            throw new CryptoException('Node key field is missing the encrypted key portion.');
+        }
+
         $encA32 = A32::fromBase64($encKey);
+
+        if (\count($encA32) !== 4 && \count($encA32) !== 8) {
+            throw new CryptoException(\sprintf(
+                'Unexpected node key length %d after decoding; expected 4 or 8 words.',
+                \count($encA32)
+            ));
+        }
 
         return Aes::decryptKey($masterKeyStr, $encA32);
     }

@@ -51,6 +51,32 @@ class Aes
     }
 
     /**
+     * Encrypt a 4 or 8 element a32 array with the given string key.
+     *
+     * An 8-element array is split into two 4-element blocks, each encrypted
+     * independently, and the results concatenated.
+     *
+     * @param string     $key 16-byte key string
+     * @param array<int> $a   4 or 8 element a32 array
+     *
+     * @return array<int>
+     */
+    public static function encryptKey(string $key, array $a): array
+    {
+        if (\count($a) === 4) {
+            return A32::fromString(self::encryptCbc($key, A32::toString($a)));
+        }
+
+        $result = [];
+        for ($i = 0; $i < \count($a); $i += 4) {
+            $block  = self::encryptCbc($key, A32::toString(\array_slice($a, $i, 4)));
+            $result = \array_merge($result, A32::fromString($block));
+        }
+
+        return $result;
+    }
+
+    /**
      * Decrypt a 4- or 8-element a32 array with the given string key.
      *
      * An 8-element array is split into two 4-element blocks, each decrypted

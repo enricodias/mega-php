@@ -200,6 +200,9 @@ class Client
     /**
      * List all nodes in the authenticated user's filesystem.
      *
+     * Returns file and folder nodes with decrypted names. Nodes whose keys
+     * cannot be decrypted are silently skipped.
+     *
      * @return Node[]
      *
      * @throws AuthException
@@ -208,7 +211,48 @@ class Client
      */
     public function listNodes(): array
     {
-        throw new \BadMethodCallException('Not implemented');
+        $this->requireSession();
+
+        $this->logger->info('Listing MEGA nodes');
+
+        $response = $this->connector->send([
+            'a' => 'f',
+            'c' => 1,
+        ]);
+
+        $rawNodes = $response['f'] ?? [];
+
+        if (!\is_array($rawNodes)) {
+            return [];
+        }
+
+        $masterKeyStr = A32::toString($this->session->getMasterKey());
+
+        $nodes = [];
+        foreach ($rawNodes as $raw) {
+            $type = isset($raw['t']) ? (int) $raw['t'] : -1;
+
+            if ($type !== Node::TYPE_FILE && $type !== Node::TYPE_FOLDER) {
+                continue;
+            }
+
+            $handle = (string) ($raw['h'] ?? '');
+            $rawKey = (string) ($raw['k'] ?? '');
+
+            if ($handle === '' || $rawKey === '') {
+                continue;
+            }
+
+            $node = $this->buildNodeFromRaw($handle, $type, $rawKey, $raw, $masterKeyStr);
+
+            if ($node === null) {
+                continue;
+            }
+
+            $nodes[] = $node;
+        }
+
+        return $nodes;
     }
 
     /**
@@ -217,10 +261,25 @@ class Client
      * @throws AuthException
      * @throws \Mega\Exception\ApiException
      * @throws HttpException
+     * @throws CryptoException
      */
     public function getFileInfo(Node $node): FileInfo
     {
-        throw new \BadMethodCallException('Not implemented');
+        $this->requireSession();
+
+        $this->logger->info('Requesting file info', ['handle' => $node->getHandle()]);
+
+        $masterKeyStr = A32::toString($this->session->getMasterKey());
+        $nodeKey = NodeKey::decryptNodeKey($node->getEncryptedKey(), $masterKeyStr);
+
+        $response = $this->connector->send([
+            'a'   => 'g',
+            'n'   => $node->getHandle(),
+            'g'   => 0,
+            'ssl' => 1,
+        ]);
+
+        return $this->buildFileInfoFromNodeResponse($response, $nodeKey);
     }
 
     /**
@@ -240,7 +299,32 @@ class Client
      */
     public function downloadFile(Node $node, $destination = null)
     {
-        throw new \BadMethodCallException('Not implemented');
+        $this->requireSession();
+
+        $this->logger->info('Downloading file', ['handle' => $node->getHandle()]);
+
+        $masterKeyStr = A32::toString($this->session->getMasterKey());
+        $nodeKey = NodeKey::decryptNodeKey($node->getEncryptedKey(), $masterKeyStr);
+
+        $response = $this->connector->send([
+            'a'   => 'g',
+            'n'   => $node->getHandle(),
+            'g'   => 1,
+            'ssl' => 1,
+        ]);
+
+        $downloadUrl = $response['g'] ?? null;
+        $size = $response['s'] ?? null;
+
+        if (!\is_string($downloadUrl) || !\is_int($size)) {
+            throw new CryptoException('File info response is missing download URL or size.');
+        }
+
+        if ($destination !== null) {
+            return $this->downloader->download($downloadUrl, $size, $nodeKey, $destination);
+        }
+
+        return $this->downloader->downloadToString($downloadUrl, $size, $nodeKey);
     }
 
     /**
@@ -304,6 +388,60 @@ class Client
         $downloadUrl = \array_key_exists('g', $response) ? (string) $response['g'] : null;
 
         return new FileInfo($name, $size, $downloadUrl !== '' ? $downloadUrl : null);
+    }
+
+    /**
+     * Build a FileInfo from an authenticated 'g' command response.
+     *
+     * @param array<string, mixed> $response
+     * @param array<int>           $nodeKey  Decrypted a32 node key
+     *
+     * @throws CryptoException
+     */
+    private function buildFileInfoFromNodeResponse(array $response, array $nodeKey): FileInfo
+    {
+        $name = '';
+        if (\array_key_exists('at', $response)) {
+            $attrCiphertext = Base64Url::decode((string) $response['at']);
+            $attrs = Attr::decrypt($attrCiphertext, $nodeKey);
+            $name = (string) ($attrs['n'] ?? '');
+        }
+
+        $size = \array_key_exists('s', $response) ? (int) $response['s'] : 0;
+        $downloadUrl = \array_key_exists('g', $response) ? (string) $response['g'] : null;
+
+        return new FileInfo($name, $size, $downloadUrl !== '' ? $downloadUrl : null);
+    }
+
+    /**
+     * Try to build a Node from a raw 'f' API response element.
+     *
+     * Returns null when the node key or attributes cannot be decrypted.
+     *
+     * @param array<string, mixed> $raw          Single element from the 'f' array
+     * @param string               $masterKeyStr 16-byte master key string
+     */
+    private function buildNodeFromRaw(string $handle, int $type, string $rawKey, array $raw, string $masterKeyStr): ?Node
+    {
+        try {
+            $nodeKey = NodeKey::decryptNodeKey($rawKey, $masterKeyStr);
+        } catch (\Throwable $e) {
+            $this->logger->debug('Skipping node: could not decrypt key', ['handle' => $handle]);
+            return null;
+        }
+
+        $name = '';
+        if (\array_key_exists('a', $raw) && $raw['a'] !== '') {
+            try {
+                $attrCiphertext = Base64Url::decode((string) $raw['a']);
+                $attrs = Attr::decrypt($attrCiphertext, $nodeKey);
+                $name = (string) ($attrs['n'] ?? '');
+            } catch (\Throwable $e) {
+                $this->logger->debug('Could not decrypt node attributes', ['handle' => $handle]);
+            }
+        }
+
+        return new Node($handle, $type, $name, $rawKey);
     }
 
     /**
