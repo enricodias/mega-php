@@ -19,7 +19,7 @@ use Mega\Exception\InvalidLinkException;
  */
 class PublicLink
 {
-    const TYPE_FILE   = 'file';
+    const TYPE_FILE = 'file';
     const TYPE_FOLDER = 'folder';
 
     /**
@@ -54,18 +54,34 @@ class PublicLink
         $fragment = (string) \parse_url($link, PHP_URL_FRAGMENT);
 
         // Legacy format: #!<handle>!<key> or #F!<handle>!<key>
-        if (\preg_match('/^(F?)!([a-zA-Z0-9]+)!([a-zA-Z0-9_,\-]+)/', $fragment, $m)) {
+        if (self::isMegaHost($link) && \preg_match('/^(F?)!([a-zA-Z0-9]+)!([a-zA-Z0-9_,\-]+)/', $fragment, $m)) {
             $type = $m[1] === 'F' ? self::TYPE_FOLDER : self::TYPE_FILE;
             return new self($m[2], $m[3], $type);
         }
 
         // Modern format: /file/<handle>#<key> or /folder/<handle>#<key>
-        if (\preg_match('`/(file|folder)/([a-zA-Z0-9]+)#([a-zA-Z0-9_,\-]+)`', $link, $m)) {
+        if (self::isMegaHost($link) && \preg_match('`/(file|folder)/([a-zA-Z0-9]+)#([a-zA-Z0-9_,\-]+)`', $link, $m)) {
             $type = $m[1] === 'folder' ? self::TYPE_FOLDER : self::TYPE_FILE;
             return new self($m[2], $m[3], $type);
         }
 
         throw new InvalidLinkException(\sprintf('Cannot parse MEGA link: %s', $link));
+    }
+
+    private static function isMegaHost(string $link): bool
+    {
+        $host = \parse_url($link, PHP_URL_HOST);
+
+        if (!\is_string($host)) {
+            return false;
+        }
+
+        return $host === 'mega.nz' ||
+               $host === 'mega.io' ||
+               $host === 'mega.co.nz' ||
+               \substr($host, -9) === '.mega.nz' ||
+               \substr($host, -9) === '.mega.io' ||
+               \substr($host, -12) === '.mega.co.nz';
     }
 
     public function getHandle(): string

@@ -15,8 +15,10 @@ use Mega\Crypto\A32;
 use Mega\Crypto\Attr;
 use Mega\Crypto\Base64Url;
 use Mega\Crypto\ChunkSizer;
+use Mega\Crypto\FileMac;
 use Mega\Crypto\NodeKey;
 use Mega\Entity\FileInfo;
+use Mega\Exception\ApiException;
 use Mega\Exception\InvalidLinkException;
 use Mega\Transport\Connector;
 use Mega\Transport\Downloader;
@@ -99,21 +101,54 @@ class ClientPublicLinkTest extends TestCase
         $client->getPublicFileInfo('https://not-a-mega-link.example.com/');
     }
 
+    public function testGetPublicFileInfoThrowsOnFolderLink(): void
+    {
+        $client = $this->makeClient('[]');
+
+        $this->expectException(InvalidLinkException::class);
+
+        $client->getPublicFileInfo('https://mega.nz/folder/FolderHnd#' . $this->linkKey());
+    }
+
+    public function testGetPublicFileInfoThrowsOnShortKey(): void
+    {
+        $client = $this->makeClient('[]');
+        $shortKey = A32::toBase64([0x01020304, 0x05060708, 0x090a0b0c, 0x0d0e0f10]);
+
+        $this->expectException(InvalidLinkException::class);
+
+        $client->getPublicFileInfo('https://mega.nz/file/AbCdEfGh#' . $shortKey);
+    }
+
+    public function testGetPublicFileInfoThrowsOnMissingSize(): void
+    {
+        $encodedAttr = $this->encodedAttr('hello.txt');
+        $apiResponse = \json_encode([['at' => $encodedAttr]]);
+        $link = 'https://mega.nz/file/AbCdEfGh#' . $this->linkKey();
+
+        $client = $this->makeClient((string) $apiResponse);
+
+        $this->expectException(ApiException::class);
+
+        $client->getPublicFileInfo($link);
+    }
+
+    public function testDownloadPublicFileThrowsOnFolderLink(): void
+    {
+        $client = $this->makeClient('[]');
+
+        $this->expectException(InvalidLinkException::class);
+
+        $client->downloadPublicFile('https://mega.nz/folder/FolderHnd#' . $this->linkKey());
+    }
+
     public function testDownloadPublicFileSendsRequestWithDlFlag(): void
     {
         $plaintext = \str_repeat('A', 16);
-        $nodeKey = $this->nodeKey();
-        $aesKey = A32::toString(NodeKey::foldToAesKey($nodeKey));
-        $iv = ChunkSizer::ivFromNodeKey($nodeKey);
-        $ciphertext = (string) \openssl_encrypt(
-            $plaintext,
-            'aes-128-ctr',
-            $aesKey,
-            \OPENSSL_RAW_DATA | \OPENSSL_ZERO_PADDING,
-            $iv
-        );
+        $fixture = $this->buildFileFixture($plaintext);
 
         $encodedAttr = $this->encodedAttr('download.txt');
+        $linkKey     = A32::toBase64($fixture['nodeKey']);
         $apiResponse = \json_encode([[
             's'  => \strlen($plaintext),
             'at' => $encodedAttr,
@@ -124,11 +159,11 @@ class ClientPublicLinkTest extends TestCase
         $client = $this->makeClientCapturingApiRequests(
             (string) $apiResponse,
             $apiRequests,
-            $ciphertext
+            $fixture['ciphertext']
         );
 
         $dest = \fopen('php://memory', 'wb+');
-        $client->downloadPublicFile('https://mega.nz/file/AbCdEfGh#' . $this->linkKey(), $dest);
+        $client->downloadPublicFile('https://mega.nz/file/AbCdEfGh#' . $linkKey, $dest);
 
         $this->assertCount(1, $apiRequests);
 
@@ -145,9 +180,43 @@ class ClientPublicLinkTest extends TestCase
     public function testDownloadPublicFileReturnsStringWhenNoDestination(): void
     {
         $plaintext = \str_repeat('B', 16);
-        $nodeKey = $this->nodeKey();
+        $fixture = $this->buildFileFixture($plaintext);
+
+        $encodedAttr = $this->encodedAttr('string.txt');
+        $linkKey = A32::toBase64($fixture['nodeKey']);
+        $apiResponse = \json_encode([[
+            's'  => \strlen($plaintext),
+            'at' => $encodedAttr,
+            'g'  => 'https://example.invalid/dl',
+        ]]);
+
+        $ignored = [];
+        $client = $this->makeClientCapturingApiRequests(
+            (string) $apiResponse,
+            $ignored,
+            $fixture['ciphertext']
+        );
+
+        $result = $client->downloadPublicFile('https://mega.nz/file/AbCdEfGh#' . $linkKey);
+
+        $this->assertSame($plaintext, $result);
+    }
+
+    /**
+     * Build a self-consistent (ciphertext, complete nodeKey) fixture using
+     * words 6/7 = 0 for AES key derivation, then embed the computed file MAC
+     * into words 2, 3, 6, 7 -- matching the Uploader::upload() flow.
+     *
+     * @return array{nodeKey: array<int>, ciphertext: string}
+     */
+    private function buildFileFixture(string $plaintext): array
+    {
+        $nodeKey = [0x01020304, 0x05060708, 0x090a0b0c, 0x0d0e0f10,
+                    0x11121314, 0x15161718, 0x00000000, 0x00000000];
+
         $aesKey = A32::toString(NodeKey::foldToAesKey($nodeKey));
         $iv = ChunkSizer::ivFromNodeKey($nodeKey);
+
         $ciphertext = (string) \openssl_encrypt(
             $plaintext,
             'aes-128-ctr',
@@ -156,23 +225,15 @@ class ClientPublicLinkTest extends TestCase
             $iv
         );
 
-        $encodedAttr = $this->encodedAttr('string.txt');
-        $apiResponse = \json_encode([[
-            's'  => \strlen($plaintext),
-            'at' => $encodedAttr,
-            'g'  => 'https://example.invalid/dl',
-        ]]);
+        $chunkMac = FileMac::chunkMac($plaintext, $aesKey, $nodeKey);
+        $fileMac  = FileMac::fileMac([$chunkMac], $aesKey);
 
-        $ignored = [];
-        $client  = $this->makeClientCapturingApiRequests(
-            (string) $apiResponse,
-            $ignored,
-            $ciphertext
-        );
+        $nodeKey[2] ^= $fileMac[0];
+        $nodeKey[3] ^= $fileMac[1];
+        $nodeKey[6]  = $fileMac[0];
+        $nodeKey[7]  = $fileMac[1];
 
-        $result = $client->downloadPublicFile('https://mega.nz/file/AbCdEfGh#' . $this->linkKey());
-
-        $this->assertSame($plaintext, $result);
+        return ['nodeKey' => $nodeKey, 'ciphertext' => $ciphertext];
     }
 
     private function makeClient(string $apiResponseBody): Client

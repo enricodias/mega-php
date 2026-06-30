@@ -12,7 +12,7 @@ class Node
     /**
      * Node type constant for a file.
      */
-    const TYPE_FILE   = 0;
+    const TYPE_FILE = 0;
 
     /**
      * Node type constant for a folder.
@@ -41,9 +41,9 @@ class Node
 
     public function __construct(string $handle, int $type, string $name, string $encryptedKey)
     {
-        $this->handle       = $handle;
-        $this->type         = $type;
-        $this->name         = $name;
+        $this->handle = $handle;
+        $this->type = $type;
+        $this->name = $name;
         $this->encryptedKey = $encryptedKey;
     }
 

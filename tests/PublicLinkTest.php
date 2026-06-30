@@ -22,6 +22,12 @@ class PublicLinkTest extends TestCase
                 'AbCdEfGh',
                 'keyString-goes_here',
             ],
+            'legacy file link (co.nz)' => [
+                'https://mega.co.nz/#!AbCdEfGh!keyString-goes_here',
+                PublicLink::TYPE_FILE,
+                'AbCdEfGh',
+                'keyString-goes_here',
+            ],
             'legacy folder link' => [
                 'https://mega.nz/#F!FolderHnd!folderKeyStr',
                 PublicLink::TYPE_FOLDER,
@@ -30,6 +36,12 @@ class PublicLinkTest extends TestCase
             ],
             'modern file link' => [
                 'https://mega.nz/file/AbCdEfGh#keyString-goes_here',
+                PublicLink::TYPE_FILE,
+                'AbCdEfGh',
+                'keyString-goes_here',
+            ],
+            'modern file link (.io)' => [
+                'https://mega.io/file/AbCdEfGh#keyString-goes_here',
                 PublicLink::TYPE_FILE,
                 'AbCdEfGh',
                 'keyString-goes_here',
@@ -87,10 +99,13 @@ class PublicLinkTest extends TestCase
     public function invalidLinkProvider(): array
     {
         return [
-            'plain url no fragment'  => ['https://mega.nz/'],
-            'unrelated url'          => ['https://example.com/something'],
-            'legacy fragment no key' => ['https://mega.nz/#!HandleOnly'],
-            'empty string'           => [''],
+            'plain url no fragment'    => ['https://mega.nz/'],
+            'unrelated url'            => ['https://example.com/something'],
+            'legacy fragment no key'   => ['https://mega.nz/#!HandleOnly'],
+            'empty string'             => [''],
+            'non-mega modern link'     => ['https://example.com/file/Handle123#Key123'],
+            'mega.nz lookalike host'   => ['https://notmega.nz/file/Handle123#Key123'],
+            'non-mega legacy fragment' => ['https://example.com/#!Handle123!Key123'],
         ];
     }
 

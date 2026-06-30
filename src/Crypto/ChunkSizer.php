@@ -94,4 +94,24 @@ class ChunkSizer
     {
         return A32::toString([$nodeKey[4], $nodeKey[5], 0, 0]);
     }
+
+    /**
+     * Build the AES-CBC-MAC IV for a chunk starting at a given byte offset.
+     *
+     * MEGA seeds the per-chunk CBC-MAC with the chunk's position encoded as
+     * two 32-bit words followed by two zero words:
+     *   word0 = (offset / 0x1000000000) & 0xffffffff
+     *   word1 = (offset / 0x10000000)   & 0xffffffff
+     *
+     * @param int $offset Byte offset of the chunk within the file
+     *
+     * @return string 16-byte binary IV
+     */
+    public static function chunkMacIv(int $offset): string
+    {
+        $hi = (int) ($offset / 0x1000000000) & 0xFFFFFFFF;
+        $lo = (int) ($offset / 0x10000000)   & 0xFFFFFFFF;
+
+        return A32::toString([$hi, $lo, $hi, $lo]);
+    }
 }

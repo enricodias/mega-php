@@ -31,8 +31,8 @@ class Session
      */
     public function __construct(array $masterKey, string $sessionId, array $privateKey)
     {
-        $this->masterKey  = $masterKey;
-        $this->sessionId  = $sessionId;
+        $this->masterKey = $masterKey;
+        $this->sessionId = $sessionId;
         $this->privateKey = $privateKey;
     }
 

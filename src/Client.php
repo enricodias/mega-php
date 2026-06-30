@@ -18,6 +18,7 @@ use Mega\Exception\ApiException;
 use Mega\Exception\AuthException;
 use Mega\Exception\CryptoException;
 use Mega\Exception\HttpException;
+use Mega\Exception\InvalidLinkException;
 use Mega\Transport\Connector;
 use Mega\Transport\Downloader;
 use Mega\Transport\SessionCache;
@@ -141,14 +142,14 @@ class Client
     /**
      * Retrieve metadata for a public file link without authentication.
      *
-     * @throws \Mega\Exception\InvalidLinkException
+     * @throws InvalidLinkException
      * @throws ApiException
      * @throws HttpException
      * @throws CryptoException
      */
     public function getPublicFileInfo(string $link): FileInfo
     {
-        $parsed = PublicLink::parse($link);
+        $parsed = $this->requirePublicFileLink($link);
 
         $this->logger->info('Requesting public file info', ['handle' => $parsed->getHandle()]);
 
@@ -172,14 +173,14 @@ class Client
      *
      * @return string|int
      *
-     * @throws \Mega\Exception\InvalidLinkException
+     * @throws InvalidLinkException
      * @throws ApiException
      * @throws HttpException
      * @throws CryptoException
      */
     public function downloadPublicFile(string $link, $destination = null)
     {
-        $parsed = PublicLink::parse($link);
+        $parsed = $this->requirePublicFileLink($link);
 
         $this->logger->info('Downloading public file', ['handle' => $parsed->getHandle()]);
 
@@ -442,11 +443,16 @@ class Client
     /**
      * @param array<string, mixed> $response
      *
+     * @throws ApiException
      * @throws CryptoException
      */
     private function buildFileInfoFromPublicResponse(array $response, string $linkKey): FileInfo
     {
         $nodeKey = A32::fromBase64($linkKey);
+
+        if (!\array_key_exists('s', $response) || !\is_int($response['s'])) {
+            throw new ApiException('Public file info response is missing a valid size.', 0);
+        }
 
         $name = '';
         if (\array_key_exists('at', $response)) {
@@ -455,10 +461,9 @@ class Client
             $name = (string) ($attrs['n'] ?? '');
         }
 
-        $size = \array_key_exists('s', $response) ? (int) $response['s'] : 0;
         $downloadUrl = \array_key_exists('g', $response) ? (string) $response['g'] : null;
 
-        return new FileInfo($name, $size, $downloadUrl !== '' ? $downloadUrl : null);
+        return new FileInfo($name, $response['s'], $downloadUrl !== '' ? $downloadUrl : null);
     }
 
     /**
@@ -586,6 +591,27 @@ class Client
         $resolvedName = $name ?? 'upload';
 
         return [$source, $size, $resolvedName];
+    }
+
+    /**
+     * Parse a public link, requiring it to be a file link with a valid
+     * 8-word file node key.
+     *
+     * @throws InvalidLinkException
+     */
+    private function requirePublicFileLink(string $link): PublicLink
+    {
+        $parsed = PublicLink::parse($link);
+
+        if (!$parsed->isFile()) {
+            throw new InvalidLinkException(\sprintf('Expected a MEGA file link, got a folder link: %s', $link));
+        }
+
+        if (\count(A32::fromBase64($parsed->getKey())) !== 8) {
+            throw new InvalidLinkException(\sprintf('MEGA file link key must decode to 8 words: %s', $link));
+        }
+
+        return $parsed;
     }
 
     /**

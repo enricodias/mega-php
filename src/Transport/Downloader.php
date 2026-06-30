@@ -6,6 +6,7 @@ namespace Mega\Transport;
 
 use Mega\Crypto\A32;
 use Mega\Crypto\ChunkSizer;
+use Mega\Crypto\FileMac;
 use Mega\Crypto\NodeKey;
 use Mega\Exception\CryptoException;
 use Mega\Exception\HttpException;
@@ -61,6 +62,7 @@ class Downloader
         $iv = ChunkSizer::ivFromNodeKey($nodeKey);
         $written = 0;
         $chunks = ChunkSizer::getChunks($size);
+        $chunkMacs = [];
 
         foreach ($chunks as $chunkSize) {
             $cipherChunk = $this->readExactly($body, $chunkSize);
@@ -77,10 +79,13 @@ class Downloader
                 throw new CryptoException('AES-CTR decryption failed for chunk.');
             }
 
+            $chunkMacs[] = FileMac::chunkMac($plain, $aesKey, $nodeKey);
+
             $iv = ChunkSizer::incrementIv($iv, $chunkSize);
-            $bytes = \fwrite($destination, $plain);
-            $written += ($bytes === false ? 0 : $bytes);
+            $written += $this->writeExactly($destination, $plain);
         }
+
+        $this->verifyFileMac($chunkMacs, $aesKey, $nodeKey);
 
         return $written;
     }
@@ -131,6 +136,12 @@ class Downloader
             throw new HttpException('Download request failed: ' . $e->getMessage(), 0, $e);
         }
 
+        $status = $response->getStatusCode();
+
+        if ($status < 200 || $status >= 300) {
+            throw new HttpException('Download request returned HTTP status ' . $status . '.');
+        }
+
         return $response->getBody();
     }
 
@@ -150,6 +161,53 @@ class Downloader
             $buffer .= $chunk;
         }
 
+        if (\strlen($buffer) < $length) {
+            throw new HttpException('Download response ended before expected content length was reached.');
+        }
+
         return $buffer;
+    }
+
+    /**
+     * Write $data to $destination, looping until every byte is written.
+     *
+     * @throws HttpException
+     */
+    private function writeExactly($destination, string $data): int
+    {
+        $length = \strlen($data);
+        $written = 0;
+
+        while ($written < $length) {
+            $bytes = \fwrite($destination, \substr($data, $written));
+
+            if ($bytes === false || $bytes === 0) {
+                throw new HttpException('Failed to write decrypted chunk to destination stream.');
+            }
+
+            $written += $bytes;
+        }
+
+        return $written;
+    }
+
+    /**
+     * Compare the accumulated chunk MACs against the file MAC embedded in
+     * the node key (words 6 and 7).
+     *
+     * @param array<array<int>> $chunkMacs
+     * @param array<int>        $nodeKey
+     *
+     * @throws CryptoException
+     */
+    private function verifyFileMac(array $chunkMacs, string $aesKey, array $nodeKey): void
+    {
+        $fileMac = FileMac::fileMac($chunkMacs, $aesKey);
+        $expected = [$nodeKey[6], $nodeKey[7]];
+        $actual = [$fileMac[0], $fileMac[1]];
+
+        if ($actual !== $expected) {
+            throw new CryptoException('Downloaded file failed MAC verification; content may be corrupted or tampered with.');
+        }
     }
 }
