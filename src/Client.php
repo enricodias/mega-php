@@ -360,6 +360,10 @@ class Client
 
         list($stream, $size, $resolvedName) = $this->resolveSource($source, $name);
 
+        if ($size === 0) {
+            throw new \InvalidArgumentException('Cannot upload an empty file.');
+        }
+
         $this->logger->info('Uploading file', ['name' => $resolvedName, 'size' => $size, 'parent' => $parentHandle]);
 
         $uploadResponse = $this->connector->send([

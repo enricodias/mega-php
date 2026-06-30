@@ -77,10 +77,6 @@ class Uploader
      */
     public function upload(string $uploadUrl, $source, int $size, array &$nodeKey): string
     {
-        if ($size === 0) {
-            throw new CryptoException('Cannot upload an empty file.');
-        }
-
         $aesKey = A32::toString(NodeKey::foldToAesKey($nodeKey));
         $iv = ChunkSizer::ivFromNodeKey($nodeKey);
         $chunks = ChunkSizer::getChunks($size);

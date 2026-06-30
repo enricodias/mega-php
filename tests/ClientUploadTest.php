@@ -28,6 +28,18 @@ use Psr\Log\NullLogger;
 
 class ClientUploadTest extends TestCase
 {
+    public function testUploadFileRejectsEmptySourceBeforeSendingUploadCommand(): void
+    {
+        $stream = $this->makeStream('');
+        $client = $this->makeClientWithMockedUploader('[]', $this->createMock(Uploader::class));
+        $client->restoreSession($this->session());
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Cannot upload an empty file.');
+
+        $client->uploadFile($stream, 'parentHd', 'empty.bin');
+    }
+
     public function testUploadFileRequiresSession(): void
     {
         $stream = \fopen('php://memory', 'rb+');
