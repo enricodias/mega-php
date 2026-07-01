@@ -377,7 +377,7 @@ class Client
             throw new ApiException('Upload command did not return a valid upload URL.', 0);
         }
 
-        $nodeKey = $this->generateNodeKey();
+        $nodeKey = NodeKey::generateNodeKey();
 
         $completionToken = $this->uploader->upload($uploadUrl, $stream, $size, $nodeKey);
 
@@ -426,10 +426,22 @@ class Client
      * @throws AuthException
      * @throws ApiException
      * @throws HttpException
+     * @throws \InvalidArgumentException
      */
     public function deleteNode(string $handle): void
     {
-        throw new \BadMethodCallException('Not implemented');
+        if ($handle === '') {
+            throw new \InvalidArgumentException('$handle must not be empty.');
+        }
+
+        $this->requireSession();
+
+        $this->logger->info('Deleting node', ['handle' => $handle]);
+
+        $this->connector->send([
+            'a' => 'd',
+            'n' => $handle,
+        ]);
     }
 
     /**
@@ -438,10 +450,27 @@ class Client
      * @throws AuthException
      * @throws ApiException
      * @throws HttpException
+     * @throws \InvalidArgumentException
      */
-    public function moveNode(string $handle, string $parentHandle): Node
+    public function moveNode(string $handle, string $parentHandle): void
     {
-        throw new \BadMethodCallException('Not implemented');
+        if ($handle === '') {
+            throw new \InvalidArgumentException('$handle must not be empty.');
+        }
+
+        if ($parentHandle === '') {
+            throw new \InvalidArgumentException('$parentHandle must not be empty.');
+        }
+
+        $this->requireSession();
+
+        $this->logger->info('Moving node', ['handle' => $handle, 'parent' => $parentHandle]);
+
+        $this->connector->send([
+            'a' => 'm',
+            'n' => $handle,
+            't' => $parentHandle,
+        ]);
     }
 
     /**
@@ -522,39 +551,6 @@ class Client
         }
 
         return new Node($handle, $type, $name, $rawKey);
-    }
-
-    /**
-     * Generate a fresh random 8-element a32 file node key.
-     *
-     * Full layout: [aes0^iv0, aes1^iv1, aes2^mac0, aes3^mac1, iv0, iv1, mac0, mac1]
-     * Initially mac0=mac1=0 (the Uploader writes the file MAC back into the key).
-     *
-     * @return array<int>
-     */
-    private function generateNodeKey(): array
-    {
-        $aes = [
-            \random_int(0, 0x7FFFFFFF),
-            \random_int(0, 0x7FFFFFFF),
-            \random_int(0, 0x7FFFFFFF),
-            \random_int(0, 0x7FFFFFFF),
-        ];
-        $iv = [
-            \random_int(0, 0x7FFFFFFF),
-            \random_int(0, 0x7FFFFFFF),
-        ];
-
-        return [
-            $aes[0] ^ $iv[0],
-            $aes[1] ^ $iv[1],
-            $aes[2],
-            $aes[3],
-            $iv[0],
-            $iv[1],
-            0,
-            0,
-        ];
     }
 
     /**
@@ -661,7 +657,7 @@ class Client
         }
 
         $masterKeyStr = A32::toString($masterKey);
-        $privkA32  = Aes::decryptKey($masterKeyStr, A32::fromBase64($response['privk']));
+        $privkA32 = Aes::decryptKey($masterKeyStr, A32::fromBase64($response['privk']));
         $rsaPrivateKey = Rsa::decomposeMpiPrivateKey(A32::toString($privkA32));
 
         $csidBytes = Base64Url::decode($response['csid']);

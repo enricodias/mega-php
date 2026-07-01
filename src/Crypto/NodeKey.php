@@ -74,4 +74,37 @@ class NodeKey
 
         return Aes::decryptKey($masterKeyStr, $encA32);
     }
+
+    /**
+     * Generate a fresh random 8-element a32 file node key.
+     *
+     * Full layout: [aes0^iv0, aes1^iv1, aes2^mac0, aes3^mac1, iv0, iv1, mac0, mac1]
+     * Initially mac0=mac1=0 (the Uploader writes the file MAC back into the key).
+     *
+     * @return array<int>
+     */
+    public static function generateNodeKey(): array
+    {
+        $aes = [
+            \random_int(0, 0x7FFFFFFF),
+            \random_int(0, 0x7FFFFFFF),
+            \random_int(0, 0x7FFFFFFF),
+            \random_int(0, 0x7FFFFFFF),
+        ];
+        $iv = [
+            \random_int(0, 0x7FFFFFFF),
+            \random_int(0, 0x7FFFFFFF),
+        ];
+
+        return [
+            $aes[0] ^ $iv[0],
+            $aes[1] ^ $iv[1],
+            $aes[2],
+            $aes[3],
+            $iv[0],
+            $iv[1],
+            0,
+            0,
+        ];
+    }
 }
