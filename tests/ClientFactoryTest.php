@@ -31,8 +31,6 @@ class ClientFactoryTest extends TestCase
         $this->assertInstanceOf(Client::class, $factory->create());
     }
 
-    // --- helpers -------------------------------------------------------------
-
     private function makeFactory(?Config $config = null): ClientFactory
     {
         $mock      = new MockHandler([new Response(200, [], '[]')]);
