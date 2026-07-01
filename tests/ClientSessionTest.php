@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace Mega\Tests;
 
 use Mega\Client;
+use Mega\Crypto\Aes;
 use Mega\Entity\Session;
 use Mega\Exception\AuthException;
+use Mega\Service\SessionAuthenticator;
 use Mega\Transport\Connector;
 use Mega\Transport\Downloader;
 use Mega\Transport\SessionCache;
@@ -39,25 +41,6 @@ class ClientSessionTest extends TestCase
         $client->exportSession();
     }
 
-    public function testLoginReturnsCachedSessionOnCacheHit(): void
-    {
-        $cached = new Session([5, 6, 7, 8], 'sid-cached', []);
-        $connector = $this->createMock(Connector::class);
-        $downloader = $this->createMock(Downloader::class);
-        $uploader = $this->createMock(Uploader::class);
-
-        $sessionCache = $this->createMock(SessionCache::class);
-        $sessionCache->method('get')->with('user@example.com')->willReturn($cached);
-        $sessionCache->expects($this->never())->method('set');
-
-        $connector->expects($this->never())->method('send');
-
-        $client = new Client($connector, $downloader, $uploader, new NullLogger(), $sessionCache);
-        $result = $client->login('user@example.com', 'password');
-
-        $this->assertSame($cached->getSessionId(), $result->getSessionId());
-    }
-
     public function testRestoreSessionSetsSessionIdOnConnector(): void
     {
         $session = new Session([1, 2, 3, 4], 'sid-from-restore', []);
@@ -71,12 +54,79 @@ class ClientSessionTest extends TestCase
         $client->restoreSession($session);
     }
 
+    public function testLoginReturnsCachedSessionOnCacheHit(): void
+    {
+        $cached = new Session([5, 6, 7, 8], 'sid-cached', []);
+        $connector = $this->createMock(Connector::class);
+        $downloader = $this->createMock(Downloader::class);
+        $uploader = $this->createMock(Uploader::class);
+        $sessionAuthenticator = $this->createMock(SessionAuthenticator::class);
+
+        $sessionCache = $this->createMock(SessionCache::class);
+        $sessionCache->method('get')->with('user@example.com')->willReturn($cached);
+        $sessionCache->expects($this->never())->method('set');
+
+        $connector->expects($this->never())->method('send');
+        $sessionAuthenticator->expects($this->never())->method('buildSessionFromLoginResponse');
+
+        $client = new Client($connector, $downloader, $uploader, new NullLogger(), $sessionCache, $sessionAuthenticator);
+        $result = $client->login('user@example.com', 'password');
+
+        $this->assertSame($cached->getSessionId(), $result->getSessionId());
+    }
+
+    public function testLoginDelegatesToSessionAuthenticatorOnCacheMiss(): void
+    {
+        $session = new Session([1, 2, 3, 4], 'sid-from-login', []);
+        $apiResponse = ['k' => 'response-from-api'];
+        $passwordKey = Aes::deriveKeyFromPassword('password');
+
+        $connector = $this->createMock(Connector::class);
+        $connector->method('send')->willReturn($apiResponse);
+        $connector->expects($this->once())->method('setSessionId')->with('sid-from-login');
+
+        $downloader = $this->createMock(Downloader::class);
+        $uploader = $this->createMock(Uploader::class);
+
+        $sessionAuthenticator = $this->createMock(SessionAuthenticator::class);
+        $sessionAuthenticator->expects($this->once())
+            ->method('buildSessionFromLoginResponse')
+            ->with($apiResponse, $passwordKey)
+            ->willReturn($session);
+
+        $client = new Client($connector, $downloader, $uploader, new NullLogger(), null, $sessionAuthenticator);
+        $result = $client->login('user@example.com', 'password');
+
+        $this->assertSame($session, $result);
+    }
+
+    public function testLoginCachesSessionBuiltBySessionAuthenticator(): void
+    {
+        $session = new Session([1, 2, 3, 4], 'sid-from-login', []);
+
+        $connector = $this->createMock(Connector::class);
+        $connector->method('send')->willReturn(['k' => 'response-from-api']);
+
+        $downloader = $this->createMock(Downloader::class);
+        $uploader = $this->createMock(Uploader::class);
+
+        $sessionAuthenticator = $this->createMock(SessionAuthenticator::class);
+        $sessionAuthenticator->method('buildSessionFromLoginResponse')->willReturn($session);
+
+        $sessionCache = $this->createMock(SessionCache::class);
+        $sessionCache->method('get')->with('user@example.com')->willReturn(null);
+        $sessionCache->expects($this->once())->method('set')->with('user@example.com', $session);
+
+        $client = new Client($connector, $downloader, $uploader, new NullLogger(), $sessionCache, $sessionAuthenticator);
+        $client->login('user@example.com', 'password');
+    }
+
     private function makeClient(): Client
     {
         $connector = $this->createMock(Connector::class);
         $downloader = $this->createMock(Downloader::class);
         $uploader = $this->createMock(Uploader::class);
-        
+
         return new Client($connector, $downloader, $uploader, new NullLogger());
     }
 }
