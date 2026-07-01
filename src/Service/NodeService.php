@@ -11,7 +11,6 @@ use Mega\Crypto\Base64Url;
 use Mega\Crypto\NodeKey;
 use Mega\Entity\FileInfo;
 use Mega\Entity\Node;
-use Mega\Entity\TransferResult;
 use Mega\Exception\ApiException;
 use Mega\Exception\CryptoException;
 use Mega\Exception\HttpException;
@@ -189,7 +188,7 @@ class NodeService
      * @throws CryptoException
      * @throws \InvalidArgumentException
      */
-    public function upload($source, string $parentHandle, string $masterKeyStr, ?string $name = null): TransferResult
+    public function upload($source, string $parentHandle, string $masterKeyStr, ?string $name = null): Node
     {
         list($stream, $size, $resolvedName) = $this->resolveSource($source, $name);
 
@@ -240,14 +239,12 @@ class NodeService
         $raw = $createdNodes[0];
         $handle = (string) ($raw['h'] ?? '');
 
-        $node = new Node(
+        return new Node(
             $handle,
             Node::TYPE_FILE,
             $resolvedName,
             $encryptedNodeKeyB64
         );
-
-        return new TransferResult($node);
     }
 
     /**

@@ -18,7 +18,6 @@ use Mega\Crypto\ChunkSizer;
 use Mega\Crypto\FileMac;
 use Mega\Crypto\NodeKey;
 use Mega\Entity\Node;
-use Mega\Entity\TransferResult;
 use Mega\Exception\CryptoException;
 use Mega\Exception\HttpException;
 use Mega\Service\NodeService;
@@ -498,10 +497,10 @@ class NodeServiceTest extends TestCase
 
         $result = $service->upload($stream, 'parentHd', A32::toString($this->masterKey()), 'file.bin');
 
-        $this->assertInstanceOf(TransferResult::class, $result);
-        $this->assertSame('returnedH', $result->getNode()->getHandle());
-        $this->assertSame(Node::TYPE_FILE, $result->getNode()->getType());
-        $this->assertSame('file.bin', $result->getNode()->getName());
+        $this->assertInstanceOf(Node::class, $result);
+        $this->assertSame('returnedH', $result->getHandle());
+        $this->assertSame(Node::TYPE_FILE, $result->getType());
+        $this->assertSame('file.bin', $result->getName());
     }
 
     public function testUploadUsesBasenameFromPathWhenNameOmitted(): void

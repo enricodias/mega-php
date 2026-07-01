@@ -9,7 +9,6 @@ use Mega\Crypto\Aes;
 use Mega\Entity\FileInfo;
 use Mega\Entity\Node;
 use Mega\Entity\Session;
-use Mega\Entity\TransferResult;
 use Mega\Exception\ApiException;
 use Mega\Exception\AuthException;
 use Mega\Exception\CryptoException;
@@ -277,7 +276,7 @@ class Client
      * @throws CryptoException
      * @throws \InvalidArgumentException
      */
-    public function uploadFile($source, string $parentHandle = '', ?string $name = null): TransferResult
+    public function uploadFile($source, string $parentHandle = '', ?string $name = null): Node
     {
         $this->requireSession();
 
