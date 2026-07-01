@@ -18,6 +18,7 @@ use Mega\Exception\AuthException;
 use Mega\Exception\CryptoException;
 use Mega\Exception\HttpException;
 use Mega\Exception\InvalidLinkException;
+use Mega\Service\NodeManagementService;
 use Mega\Service\SessionAuthenticator;
 use Mega\Transport\Connector;
 use Mega\Transport\Downloader;
@@ -66,13 +67,19 @@ class Client
      */
     private $sessionAuthenticator;
 
+    /**
+     * @var NodeManagementService
+     */
+    private $nodeManagementService;
+
     public function __construct(
         Connector $connector,
         Downloader $downloader,
         Uploader $uploader,
         ?LoggerInterface $logger = null,
         ?SessionCache $sessionCache = null,
-        ?SessionAuthenticator $sessionAuthenticator = null
+        ?SessionAuthenticator $sessionAuthenticator = null,
+        ?NodeManagementService $nodeManagementService = null
     ) {
         $this->connector = $connector;
         $this->downloader = $downloader;
@@ -81,6 +88,7 @@ class Client
         $this->sessionCache = $sessionCache;
         $this->session = null;
         $this->sessionAuthenticator = $sessionAuthenticator !== null ? $sessionAuthenticator : new SessionAuthenticator();
+        $this->nodeManagementService = $nodeManagementService !== null ? $nodeManagementService : new NodeManagementService($connector);
     }
 
     /**
@@ -437,18 +445,11 @@ class Client
      */
     public function deleteNode(string $handle): void
     {
-        if ($handle === '') {
-            throw new \InvalidArgumentException('$handle must not be empty.');
-        }
-
         $this->requireSession();
 
         $this->logger->info('Deleting node', ['handle' => $handle]);
 
-        $this->connector->send([
-            'a' => 'd',
-            'n' => $handle,
-        ]);
+        $this->nodeManagementService->delete($handle);
     }
 
     /**
@@ -461,23 +462,11 @@ class Client
      */
     public function moveNode(string $handle, string $parentHandle): void
     {
-        if ($handle === '') {
-            throw new \InvalidArgumentException('$handle must not be empty.');
-        }
-
-        if ($parentHandle === '') {
-            throw new \InvalidArgumentException('$parentHandle must not be empty.');
-        }
-
         $this->requireSession();
 
         $this->logger->info('Moving node', ['handle' => $handle, 'parent' => $parentHandle]);
 
-        $this->connector->send([
-            'a' => 'm',
-            'n' => $handle,
-            't' => $parentHandle,
-        ]);
+        $this->nodeManagementService->move($handle, $parentHandle);
     }
 
     /**
