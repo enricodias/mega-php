@@ -204,7 +204,7 @@ class PublicFileServiceTest extends TestCase
     /**
      * Build a self-consistent (ciphertext, complete nodeKey) fixture using
      * words 6/7 = 0 for AES key derivation, then embed the computed file MAC
-     * into words 2, 3, 6, 7 -- matching the Uploader::upload() flow.
+     * into words 2, 3, 6, 7, matching the Uploader::upload() flow.
      *
      * @return array{nodeKey: array<int>, ciphertext: string}
      */

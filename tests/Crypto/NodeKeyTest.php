@@ -80,7 +80,7 @@ class NodeKeyTest extends TestCase
         $encA32 = A32::fromString($encBin);
         $encB64 = A32::toBase64($encA32);
 
-        // Multiple segments separated by "/" -- only the first should be used
+        // Multiple segments separated by "/", only the first should be used
         $rawKey = 'userA:' . $encB64 . '/userB:ZmFrZWtleQ';
         $decrypted = NodeKey::decryptNodeKey($rawKey, $masterKeyStr);
 
