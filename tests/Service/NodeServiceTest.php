@@ -18,6 +18,7 @@ use Mega\Crypto\ChunkSizer;
 use Mega\Crypto\FileMac;
 use Mega\Crypto\NodeKey;
 use Mega\Entity\Node;
+use Mega\Exception\ApiException;
 use Mega\Exception\CryptoException;
 use Mega\Exception\HttpException;
 use Mega\Service\NodeService;
@@ -376,7 +377,7 @@ class NodeServiceTest extends TestCase
 
         $apiRequests = [];
         $nodeCreateResponse = \json_encode([
-            ['f' => [['h' => 'newHndl1', 't' => Node::TYPE_FILE, 'k' => '', 'a' => '']]],
+            ['f' => [['h' => 'newHndl1', 't' => Node::TYPE_FILE, 'k' => $this->encryptedRawKey($this->fileNodeKey()), 'a' => '']]],
         ]);
         $uploadUrlResponse = \json_encode([['p' => 'https://upload.example.invalid/']]);
 
@@ -408,7 +409,7 @@ class NodeServiceTest extends TestCase
 
         $apiRequests = [];
         $nodeCreateResponse = \json_encode([
-            ['f' => [['h' => 'newHndl2', 't' => Node::TYPE_FILE, 'k' => '', 'a' => '']]],
+            ['f' => [['h' => 'newHndl2', 't' => Node::TYPE_FILE, 'k' => $this->encryptedRawKey($this->fileNodeKey()), 'a' => '']]],
         ]);
         $uploadUrlResponse = \json_encode([['p' => 'https://upload.example.invalid/']]);
 
@@ -448,7 +449,7 @@ class NodeServiceTest extends TestCase
 
         $apiRequests = [];
         $nodeCreateResponse = \json_encode([
-            ['f' => [['h' => 'decAttrH', 't' => Node::TYPE_FILE, 'k' => '', 'a' => '']]],
+            ['f' => [['h' => 'decAttrH', 't' => Node::TYPE_FILE, 'k' => $this->encryptedRawKey($this->fileNodeKey()), 'a' => '']]],
         ]);
         $uploadUrlResponse = \json_encode([['p' => 'https://upload.example.invalid/']]);
 
@@ -484,7 +485,7 @@ class NodeServiceTest extends TestCase
 
         $ignored = [];
         $nodeCreateResponse = \json_encode([
-            ['f' => [['h' => 'returnedH', 't' => Node::TYPE_FILE, 'k' => '', 'a' => '']]],
+            ['f' => [['h' => 'returnedH', 't' => Node::TYPE_FILE, 'k' => $this->encryptedRawKey($this->fileNodeKey()), 'a' => '']]],
         ]);
         $uploadUrlResponse = \json_encode([['p' => 'https://upload.example.invalid/']]);
 
@@ -501,6 +502,36 @@ class NodeServiceTest extends TestCase
         $this->assertSame('returnedH', $result->getHandle());
         $this->assertSame(Node::TYPE_FILE, $result->getType());
         $this->assertSame('file.bin', $result->getName());
+
+        $decryptedKey = NodeKey::decryptNodeKey($result->getEncryptedKey(), A32::toString($this->masterKey()));
+
+        $this->assertSame($this->fileNodeKey(), $decryptedKey);
+    }
+
+    public function testUploadThrowsWhenNodeCreateResponseIsMissingKey(): void
+    {
+        $plaintext = \str_repeat('F', 16);
+        $stream = $this->makeStream($plaintext);
+
+        $uploader = $this->createMock(Uploader::class);
+        $uploader->method('upload')->willReturn('tok');
+
+        $ignored = [];
+        $nodeCreateResponse = \json_encode([
+            ['f' => [['h' => 'noKeyHndl', 't' => Node::TYPE_FILE, 'k' => '', 'a' => '']]],
+        ]);
+        $uploadUrlResponse = \json_encode([['p' => 'https://upload.example.invalid/']]);
+
+        $service = $this->makeServiceCapturingTwoApiRequests(
+            (string) $uploadUrlResponse,
+            (string) $nodeCreateResponse,
+            $ignored,
+            $uploader
+        );
+
+        $this->expectException(ApiException::class);
+
+        $service->upload($stream, 'parentHd', A32::toString($this->masterKey()), 'file.bin');
     }
 
     public function testUploadUsesBasenameFromPathWhenNameOmitted(): void
@@ -513,7 +544,7 @@ class NodeServiceTest extends TestCase
 
         $apiRequests = [];
         $nodeCreateResponse = \json_encode([
-            ['f' => [['h' => 'basenHndl', 't' => Node::TYPE_FILE, 'k' => '', 'a' => '']]],
+            ['f' => [['h' => 'basenHndl', 't' => Node::TYPE_FILE, 'k' => $this->encryptedRawKey($this->fileNodeKey()), 'a' => '']]],
         ]);
         $uploadUrlResponse = \json_encode([['p' => 'https://upload.example.invalid/']]);
 
@@ -550,7 +581,7 @@ class NodeServiceTest extends TestCase
 
         $apiRequests = [];
         $nodeCreateResponse = \json_encode([
-            ['f' => [['h' => 'genNameHd', 't' => Node::TYPE_FILE, 'k' => '', 'a' => '']]],
+            ['f' => [['h' => 'genNameHd', 't' => Node::TYPE_FILE, 'k' => $this->encryptedRawKey($this->fileNodeKey()), 'a' => '']]],
         ]);
         $uploadUrlResponse = \json_encode([['p' => 'https://upload.example.invalid/']]);
 

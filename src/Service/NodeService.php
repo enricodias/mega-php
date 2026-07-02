@@ -239,12 +239,17 @@ class NodeService
 
         $raw = $createdNodes[0];
         $handle = (string) ($raw['h'] ?? '');
+        $rawKey = (string) ($raw['k'] ?? '');
+
+        if ($handle === '' || $rawKey === '') {
+            throw new ApiException('Node-create command returned an incomplete node.', 0);
+        }
 
         return new Node(
             $handle,
             Node::TYPE_FILE,
             $resolvedName,
-            $encryptedNodeKeyB64
+            $rawKey
         );
     }
 
