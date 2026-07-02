@@ -22,6 +22,13 @@ use Psr\Log\LoggerInterface;
 class Connector
 {
     /**
+     * Field names known to carry auth hashes, encrypted keys, or session
+     * material in MEGA API requests and responses. Redacted from logs
+     * regardless of nesting depth (e.g. inside 'f' node lists).
+     */
+    private const SENSITIVE_KEYS = ['g', 'k', 'uh', 'csid', 'privk', 'tsid', 'sid', 'ha', 'ok'];
+
+    /**
      * @var string
      */
     private $apiUrl;
@@ -93,7 +100,10 @@ class Connector
 
         $body = \json_encode([$command]);
 
-        $this->logger->debug('MEGA API request', ['url' => $url, 'body' => $body]);
+        $this->logger->debug('MEGA API request', [
+            'url'  => $url,
+            'body' => \json_encode([$this->redactSensitiveData($command)]),
+        ]);
 
         $stream = $this->streamFactory->createStream((string) $body);
         $request = $this->requestFactory
@@ -109,9 +119,11 @@ class Connector
 
         $raw = (string) $response->getBody();
 
-        $this->logger->debug('MEGA API response', ['body' => $raw]);
-
         $decoded = \json_decode($raw, true);
+
+        $this->logger->debug('MEGA API response', [
+            'body' => \is_array($decoded) ? \json_encode($this->redactSensitiveData($decoded)) : $raw,
+        ]);
 
         if (!\is_array($decoded)) {
             $this->throwIfApiError($decoded);
@@ -123,6 +135,34 @@ class Connector
         $this->throwIfApiError($result);
 
         return $result;
+    }
+
+    /**
+     * Recursively replace known-sensitive field values with a redaction
+     * marker for safe logging, leaving the original structure untouched.
+     *
+     * @param mixed $value
+     *
+     * @return mixed
+     */
+    private function redactSensitiveData($value)
+    {
+        if (!\is_array($value)) {
+            return $value;
+        }
+
+        $redacted = [];
+
+        foreach ($value as $key => $item) {
+            if (\is_string($key) && \in_array($key, self::SENSITIVE_KEYS, true)) {
+                $redacted[$key] = '[REDACTED]';
+                continue;
+            }
+
+            $redacted[$key] = $this->redactSensitiveData($item);
+        }
+
+        return $redacted;
     }
 
     /**
