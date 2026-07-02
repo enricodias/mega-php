@@ -49,7 +49,7 @@ class SessionAuthenticator
         $csidBytes = Base64Url::decode($response['csid']);
         $csidInt = A32::mpiToInt($csidBytes);
         $sidRaw = Rsa::decrypt($csidInt, $rsaPrivateKey[0], $rsaPrivateKey[1], $rsaPrivateKey[2]);
-        $sessionId = Base64Url::encode(\substr(\strrev($sidRaw), 0, 43));
+        $sessionId = Base64Url::encode(\substr($sidRaw, 0, 43));
 
         return new Session($masterKey, $sessionId, $rsaPrivateKey);
     }
