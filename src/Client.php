@@ -70,6 +70,11 @@ class Client
      */
     private $nodeService;
 
+    /**
+     * @var Config|null
+     */
+    private $config;
+
     public function __construct(
         Connector $connector,
         Downloader $downloader,
@@ -79,7 +84,8 @@ class Client
         ?SessionAuthenticator $sessionAuthenticator = null,
         ?NodeManagementService $nodeManagementService = null,
         ?PublicFileService $publicFileService = null,
-        ?NodeService $nodeService = null
+        ?NodeService $nodeService = null,
+        ?Config $config = null
     ) {
         $this->connector = $connector;
         $this->logger = $logger !== null ? $logger : new NullLogger();
@@ -89,6 +95,7 @@ class Client
         $this->nodeManagementService = $nodeManagementService !== null ? $nodeManagementService : new NodeManagementService($connector);
         $this->publicFileService = $publicFileService !== null ? $publicFileService : new PublicFileService($connector, $downloader);
         $this->nodeService = $nodeService !== null ? $nodeService : new NodeService($connector, $downloader, $uploader, $this->logger);
+        $this->config = $config;
     }
 
     /**
@@ -115,7 +122,7 @@ class Client
         $this->logger->info('Logging in to MEGA', ['email' => $email]);
 
         $passwordKey = Aes::deriveKeyFromPassword($password);
-        $userHash    = Aes::userHash(\strtolower($email), $passwordKey);
+        $userHash = Aes::userHash(\strtolower($email), $passwordKey);
 
         $response = $this->connector->send([
             'a'    => 'us',
@@ -323,13 +330,25 @@ class Client
     }
 
     /**
+     * Ensure a session is active, transparently logging in with credentials
+     * from Config when one is available and no session has been set yet.
+     *
      * @throws AuthException
+     * @throws ApiException
+     * @throws HttpException
      */
     private function requireSession(): void
     {
-        if ($this->session === null) {
-            throw new AuthException('No active session. Call login() or restoreSession() first.');
+        if ($this->session !== null) {
+            return;
         }
+
+        if ($this->config !== null && $this->config->getEmail() !== null && $this->config->getPassword() !== null) {
+            $this->login($this->config->getEmail(), $this->config->getPassword());
+            return;
+        }
+
+        throw new AuthException('No active session. Call login() or restoreSession() first.');
     }
 
     private function applySession(Session $session): void

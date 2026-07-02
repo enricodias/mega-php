@@ -109,6 +109,6 @@ class ClientFactory
             ? new SessionCache($this->cachePool)
             : null;
 
-        return new Client($connector, $downloader, $uploader, $this->logger, $sessionCache);
+        return new Client($connector, $downloader, $uploader, $this->logger, $sessionCache, null, null, null, null, $this->config);
     }
 }

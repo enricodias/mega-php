@@ -17,13 +17,38 @@ class Config
      */
     private $apiUrl;
 
-    public function __construct(string $apiUrl = self::SERVER_GLOBAL)
-    {
+    /**
+     * @var string|null
+     */
+    private $email;
+
+    /**
+     * @var string|null
+     */
+    private $password;
+
+    public function __construct(
+        string $apiUrl = self::SERVER_GLOBAL,
+        ?string $email = null,
+        ?string $password = null
+    ) {
         $this->apiUrl = $apiUrl;
+        $this->email = $email;
+        $this->password = $password;
     }
 
     public function getApiUrl(): string
     {
         return $this->apiUrl;
+    }
+
+    public function getEmail(): ?string
+    {
+        return $this->email;
+    }
+
+    public function getPassword(): ?string
+    {
+        return $this->password;
     }
 }

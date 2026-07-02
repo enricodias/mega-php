@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Mega\Tests;
 
 use Mega\Client;
+use Mega\Config;
 use Mega\Crypto\A32;
 use Mega\Crypto\Aes;
 use Mega\Entity\FileInfo;
@@ -129,6 +130,70 @@ class ClientTest extends TestCase
 
         $client = new Client($connector, $downloader, $uploader, new NullLogger(), $sessionCache, $sessionAuthenticator);
         $client->login('user@example.com', 'password');
+    }
+
+    public function testRequireSessionAutoLoginsUsingConfigCredentials(): void
+    {
+        $session = new Session([1, 2, 3, 4], 'sid-from-auto-login', []);
+        $node = new Node('fileHndl', Node::TYPE_FILE, 'file.txt', 'owner:key');
+        $apiResponse = ['k' => 'response-from-api'];
+        $passwordKey = Aes::deriveKeyFromPassword('password');
+
+        $connector = $this->createMock(Connector::class);
+        $connector->method('send')->willReturn($apiResponse);
+        $connector->expects($this->once())->method('setSessionId')->with('sid-from-auto-login');
+
+        $downloader = $this->createMock(Downloader::class);
+        $uploader = $this->createMock(Uploader::class);
+
+        $sessionAuthenticator = $this->createMock(SessionAuthenticator::class);
+        $sessionAuthenticator->expects($this->once())
+            ->method('buildSessionFromLoginResponse')
+            ->with($apiResponse, $passwordKey)
+            ->willReturn($session);
+
+        $nodeService = $this->createMock(NodeService::class);
+        $nodeService->expects($this->once())
+            ->method('listNodes')
+            ->with(A32::toString($session->getMasterKey()))
+            ->willReturn([$node]);
+
+        $config = new Config(Config::SERVER_GLOBAL, 'user@example.com', 'password');
+
+        $client = new Client(
+            $connector,
+            $downloader,
+            $uploader,
+            new NullLogger(),
+            null,
+            $sessionAuthenticator,
+            null,
+            null,
+            $nodeService,
+            $config
+        );
+
+        $nodes = $client->listNodes();
+
+        $this->assertSame([$node], $nodes);
+    }
+
+    public function testRequireSessionThrowsWhenConfigCredentialsIncomplete(): void
+    {
+        $config = new Config(Config::SERVER_GLOBAL, 'user@example.com', null);
+
+        $nodeService = $this->createMock(NodeService::class);
+        $nodeService->expects($this->never())->method('listNodes');
+
+        $connector = $this->createMock(Connector::class);
+        $downloader = $this->createMock(Downloader::class);
+        $uploader = $this->createMock(Uploader::class);
+
+        $client = new Client($connector, $downloader, $uploader, new NullLogger(), null, null, null, null, $nodeService, $config);
+
+        $this->expectException(AuthException::class);
+
+        $client->listNodes();
     }
 
     public function testListNodesRequiresSession(): void
