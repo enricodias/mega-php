@@ -284,7 +284,7 @@ class NodeService
         try {
             $nodeKey = NodeKey::decryptNodeKey($rawKey, $masterKeyStr);
         } catch (\Throwable $e) {
-            $this->logger->debug('Skipping node: could not decrypt key', ['handle' => $handle]);
+            $this->logger->warning('Skipping node: could not decrypt key', ['handle' => $handle]);
             return null;
         }
 
@@ -295,7 +295,7 @@ class NodeService
                 $attrs = Attr::decrypt($attrCiphertext, $nodeKey);
                 $name = (string) ($attrs['n'] ?? '');
             } catch (\Throwable $e) {
-                $this->logger->debug('Could not decrypt node attributes', ['handle' => $handle]);
+                $this->logger->warning('Could not decrypt node attributes', ['handle' => $handle]);
             }
         }
 
