@@ -540,6 +540,54 @@ class NodeServiceTest extends TestCase
         $this->assertSame(\basename((string) $tmpFile), $attrs['n']);
     }
 
+    public function testUploadGeneratesUniqueNameWhenSourceIsStreamWithoutName(): void
+    {
+        $plaintext = \str_repeat('E', 16);
+        $stream = $this->makeStream($plaintext);
+
+        $uploader = $this->createMock(Uploader::class);
+        $uploader->method('upload')->willReturn('tok');
+
+        $apiRequests = [];
+        $nodeCreateResponse = \json_encode([
+            ['f' => [['h' => 'genNameHd', 't' => Node::TYPE_FILE, 'k' => '', 'a' => '']]],
+        ]);
+        $uploadUrlResponse = \json_encode([['p' => 'https://upload.example.invalid/']]);
+
+        $logger = $this->createMock(\Psr\Log\LoggerInterface::class);
+        $logger->expects($this->once())
+            ->method('notice')
+            ->with(
+                $this->stringContains('default name'),
+                $this->callback(function (array $context) {
+                    return isset($context['name']) && \strpos($context['name'], 'upload_') === 0;
+                })
+            );
+
+        $service = $this->makeServiceCapturingTwoApiRequests(
+            (string) $uploadUrlResponse,
+            (string) $nodeCreateResponse,
+            $apiRequests,
+            $uploader,
+            $logger
+        );
+
+        $result = $service->upload($stream, 'parentHd', A32::toString($this->masterKey()));
+
+        $this->assertStringStartsWith('upload_', $result->getName());
+
+        $secondBody = \json_decode((string) $apiRequests[1]->getBody(), true);
+        $nodeEntry = $secondBody[0]['n'][0];
+
+        $masterKeyStr = A32::toString($this->masterKey());
+        $encKeyA32 = A32::fromBase64($nodeEntry['k']);
+        $nodeKey = Aes::decryptKey($masterKeyStr, $encKeyA32);
+        $attrCiphertext = Base64Url::decode($nodeEntry['a']);
+        $attrs = Attr::decrypt($attrCiphertext, $nodeKey);
+
+        $this->assertStringStartsWith('upload_', $attrs['n']);
+    }
+
     /**
      * 4-element a32 master key used for all tests.
      *
@@ -685,7 +733,8 @@ class NodeServiceTest extends TestCase
         string $firstApiResponse,
         string $secondApiResponse,
         array &$capturedApiRequests,
-        Uploader $uploader
+        Uploader $uploader,
+        ?\Psr\Log\LoggerInterface $logger = null
     ): NodeService {
         $factory = new HttpFactory();
 
@@ -712,7 +761,7 @@ class NodeServiceTest extends TestCase
 
         $downloader = $this->createMock(Downloader::class);
 
-        return new NodeService($connector, $downloader, $uploader);
+        return new NodeService($connector, $downloader, $uploader, $logger);
     }
 
     /**

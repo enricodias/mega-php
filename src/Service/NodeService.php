@@ -176,7 +176,8 @@ class NodeService
      *
      * $source may be a readable stream resource or a local file path string.
      * If $name is null and $source is a path, the basename of the path is used.
-     * If $name is null and $source is a stream, the name defaults to 'upload'.
+     * If $name is null and $source is a stream, a unique name is generated
+     * with the format 'upload_<unique id>' and the event is logged.
      *
      * @param string|resource $source
      * @param string          $parentHandle
@@ -336,7 +337,14 @@ class NodeService
 
         $stat = \fstat($source);
         $size = ($stat !== false && \array_key_exists('size', $stat)) ? (int) $stat['size'] : 0;
-        $resolvedName = $name ?? 'upload';
+
+        if ($name !== null) {
+            return [$source, $size, $name];
+        }
+
+        $resolvedName = \sprintf('upload_%s', \uniqid());
+
+        $this->logger->notice('Generated default name for stream upload without a name', ['name' => $resolvedName]);
 
         return [$source, $size, $resolvedName];
     }

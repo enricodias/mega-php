@@ -264,7 +264,8 @@ class Client
      *
      * $source may be a readable stream resource or a local file path string.
      * If $name is null and $source is a path, the basename of the path is used.
-     * If $name is null and $source is a stream, the name defaults to 'upload'.
+     * If $name is null and $source is a stream, a unique name is generated
+     * with the format 'upload_<unique id>' and the event is logged.
      *
      * @param string|resource $source
      * @param string          $parentHandle
