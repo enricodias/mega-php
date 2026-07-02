@@ -12,6 +12,8 @@ namespace Mega\Crypto;
  */
 class Aes
 {
+    private const ZERO_IV = "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0";
+
     /**
      * AES-128-CBC encrypt with zero IV.
      *
@@ -27,7 +29,7 @@ class Aes
             'aes-128-cbc',
             $key,
             \OPENSSL_RAW_DATA | \OPENSSL_ZERO_PADDING,
-            \str_repeat("\0", 16)
+            self::ZERO_IV
         );
     }
 
@@ -46,7 +48,7 @@ class Aes
             'aes-128-cbc',
             $key,
             \OPENSSL_RAW_DATA | \OPENSSL_ZERO_PADDING,
-            \str_repeat("\0", 16)
+            self::ZERO_IV
         );
     }
 
@@ -114,16 +116,23 @@ class Aes
         $a = A32::fromString($password);
         $pkey = A32::toString([0x93C467E3, 0x7DB0C7A4, 0xD1BE3F81, 0x0152CB56]);
         $total = \count($a);
+        $keyBlocks = [];
+
+        for ($j = 0; $j < $total; $j += 4) {
+            $block = [0,0,0,0];
+
+            for ($i = 0; $i < 4; $i++) {
+                if (\array_key_exists($j + $i, $a)) {
+                    $block[$i] = $a[$j + $i];
+                }
+            }
+
+            $keyBlocks[] = A32::toString($block);
+        }
 
         for ($r = 65536; $r--;) {
-            for ($j = 0; $j < $total; $j += 4) {
-                $key = [0, 0, 0, 0];
-                for ($i = 0; $i < 4; $i++) {
-                    if ($i + $j < $total) {
-                        $key[$i] = $a[$i + $j];
-                    }
-                }
-                $pkey = self::encryptCbc(A32::toString($key), $pkey);
+            foreach ($keyBlocks as $key) {
+                $pkey = self::encryptCbc($key, $pkey);
             }
         }
 
