@@ -182,6 +182,24 @@ class NodeServiceTest extends TestCase
         $this->assertNull($info->getDownloadUrl());
     }
 
+    public function testGetFileInfoThrowsOnFolderNode(): void
+    {
+        $folderKey = $this->folderNodeKey();
+        $rawKey = $this->encryptedRawKey($folderKey);
+        $node = new Node('foldHndl', Node::TYPE_FOLDER, 'My Folder', $rawKey);
+
+        $apiRequests = [];
+        $service = $this->makeServiceCapturingApiRequests('[]', $apiRequests);
+
+        $this->expectException(\InvalidArgumentException::class);
+
+        try {
+            $service->getFileInfo($node, A32::toString($this->masterKey()));
+        } finally {
+            $this->assertCount(0, $apiRequests);
+        }
+    }
+
     public function testDownloadSendsCorrectCommand(): void
     {
         $plaintext = \str_repeat('X', 16);
@@ -251,6 +269,24 @@ class NodeServiceTest extends TestCase
         $this->assertSame($plaintext, \stream_get_contents($dest));
         $this->assertSame(\strlen($plaintext), $bytesWritten);
         \fclose($dest);
+    }
+
+    public function testDownloadThrowsOnFolderNode(): void
+    {
+        $folderKey = $this->folderNodeKey();
+        $rawKey = $this->encryptedRawKey($folderKey);
+        $node = new Node('foldHndl', Node::TYPE_FOLDER, 'My Folder', $rawKey);
+
+        $apiRequests = [];
+        $service = $this->makeServiceCapturingApiRequests('[]', $apiRequests);
+
+        $this->expectException(\InvalidArgumentException::class);
+
+        try {
+            $service->download($node, A32::toString($this->masterKey()));
+        } finally {
+            $this->assertCount(0, $apiRequests);
+        }
     }
 
     public function testDownloadThrowsOnNon2xxStatus(): void

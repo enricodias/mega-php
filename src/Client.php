@@ -230,6 +230,7 @@ class Client
      * @throws ApiException
      * @throws HttpException
      * @throws CryptoException
+     * @throws \InvalidArgumentException
      */
     public function getFileInfo(Node $node): FileInfo
     {
@@ -257,6 +258,7 @@ class Client
      * @throws ApiException
      * @throws HttpException
      * @throws CryptoException
+     * @throws \InvalidArgumentException
      */
     public function downloadFile(Node $node, $destination = null)
     {

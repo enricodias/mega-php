@@ -116,9 +116,12 @@ class NodeService
      * @throws ApiException
      * @throws HttpException
      * @throws CryptoException
+     * @throws \InvalidArgumentException
      */
     public function getFileInfo(Node $node, string $masterKeyStr): FileInfo
     {
+        $this->requireFileNode($node);
+
         $nodeKey = NodeKey::decryptNodeKey($node->getEncryptedKey(), $masterKeyStr);
 
         $response = $this->connector->send([
@@ -146,9 +149,12 @@ class NodeService
      * @throws ApiException
      * @throws HttpException
      * @throws CryptoException
+     * @throws \InvalidArgumentException
      */
     public function download(Node $node, string $masterKeyStr, $destination = null)
     {
+        $this->requireFileNode($node);
+
         $nodeKey = NodeKey::decryptNodeKey($node->getEncryptedKey(), $masterKeyStr);
 
         $response = $this->connector->send([
@@ -259,6 +265,19 @@ class NodeService
             $resolvedName,
             $rawKey
         );
+    }
+
+    /**
+     * @throws \InvalidArgumentException
+     */
+    private function requireFileNode(Node $node): void
+    {
+        if ($node->getType() !== Node::TYPE_FILE) {
+            throw new \InvalidArgumentException(\sprintf(
+                'Expected a file node, got a folder node: %s',
+                $node->getHandle()
+            ));
+        }
     }
 
     /**
