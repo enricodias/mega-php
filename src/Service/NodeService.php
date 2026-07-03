@@ -85,7 +85,7 @@ class NodeService
 
         $nodes = [];
         foreach ($rawNodes as $raw) {
-            $type = isset($raw['t']) ? (int) $raw['t'] : -1;
+            $type = \array_key_exists('t', $raw) ? (int) $raw['t'] : -1;
 
             if ($type !== Node::TYPE_FILE && $type !== Node::TYPE_FOLDER) {
                 continue;
@@ -132,9 +132,10 @@ class NodeService
     }
 
     /**
-     * Download an authenticated file. Returns decrypted file content as a
-     * string when $destination is null, or the number of bytes written when a
-     * writable stream resource is given.
+     * Download an authenticated file.
+     * 
+     * Returns decrypted file content as a string when $destination is null,
+     * or the number of bytes written when a writable stream resource is given.
      *
      * @param Node          $node
      * @param string        $masterKeyStr
@@ -179,27 +180,34 @@ class NodeService
      * If $name is null and $source is a stream, a unique name is generated
      * with the format 'upload_<unique id>' and the event is logged.
      *
+     * MEGA requires the total upload size upfront, both to request an upload
+     * URL and to compute chunk boundaries, so it cannot be discovered by
+     * reading until EOF. For file paths the size comes from filesize(). For
+     * stream resources, $size is used directly when given; otherwise the
+     * stream must be seekable so its remaining length can be measured.
+     *
      * @param string|resource $source
      * @param string          $parentHandle
      * @param string          $masterKeyStr
      * @param string|null     $name
+     * @param int|null        $size Total byte length of $source.
      *
      * @throws ApiException
      * @throws HttpException
      * @throws CryptoException
      * @throws \InvalidArgumentException
      */
-    public function upload($source, string $parentHandle, string $masterKeyStr, ?string $name = null): Node
+    public function upload($source, string $parentHandle, string $masterKeyStr, ?string $name = null, ?int $size = null): Node
     {
-        list($stream, $size, $resolvedName) = $this->resolveSource($source, $name);
+        list($stream, $resolvedSize, $resolvedName) = $this->resolveSource($source, $name, $size);
 
-        if ($size === 0) {
+        if ($resolvedSize === 0) {
             throw new \InvalidArgumentException('Cannot upload an empty file.');
         }
 
         $uploadResponse = $this->connector->send([
             'a' => 'u',
-            's' => $size,
+            's' => $resolvedSize,
         ]);
 
         $uploadUrl = $uploadResponse['p'] ?? null;
@@ -210,7 +218,7 @@ class NodeService
 
         $nodeKey = NodeKey::generateNodeKey();
 
-        $completionToken = $this->uploader->upload($uploadUrl, $stream, $size, $nodeKey);
+        $completionToken = $this->uploader->upload($uploadUrl, $stream, $resolvedSize, $nodeKey);
 
         $encryptedNodeKey = Aes::encryptKey($masterKeyStr, $nodeKey);
         $encryptedNodeKeyB64 = A32::toBase64($encryptedNodeKey);
@@ -312,12 +320,13 @@ class NodeService
      *
      * @param string|resource $source
      * @param string|null     $name
+     * @param int|null        $size Explicit size for resource sources; ignored for file paths
      *
      * @return array{0: resource, 1: int, 2: string}
      *
      * @throws \InvalidArgumentException
      */
-    private function resolveSource($source, ?string $name): array
+    private function resolveSource($source, ?string $name, ?int $size): array
     {
         if (\is_string($source)) {
             if (!\file_exists($source)) {
@@ -330,27 +339,67 @@ class NodeService
                 throw new \InvalidArgumentException(\sprintf('Cannot open source file for reading: %s', $source));
             }
 
-            $size = (int) \filesize($source);
+            $resolvedSize = (int) \filesize($source);
             $resolvedName = $name ?? \basename($source);
 
-            return [$stream, $size, $resolvedName];
+            return [$stream, $resolvedSize, $resolvedName];
         }
 
         if (!\is_resource($source)) {
             throw new \InvalidArgumentException('$source must be a file path string or a readable stream resource.');
         }
 
-        $stat = \fstat($source);
-        $size = ($stat !== false && \array_key_exists('size', $stat)) ? (int) $stat['size'] : 0;
+        list($stream, $resolvedSize) = $size !== null ? [$source, $size] : $this->measureSeekableStream($source);
 
         if ($name !== null) {
-            return [$source, $size, $name];
+            return [$stream, $resolvedSize, $name];
         }
 
         $resolvedName = \sprintf('upload_%s', \uniqid());
 
         $this->logger->notice('Generated default name for stream upload without a name', ['name' => $resolvedName]);
 
-        return [$source, $size, $resolvedName];
+        return [$stream, $resolvedSize, $resolvedName];
+    }
+
+    /**
+     * Measure the bytes remaining from a seekable stream's current position
+     * without disturbing that position.
+     *
+     * @param resource $source
+     *
+     * @return array{0: resource, 1: int}
+     *
+     * @throws \InvalidArgumentException
+     */
+    private function measureSeekableStream($source): array
+    {
+        $currentPosition = \ftell($source);
+
+        if ($currentPosition === false) {
+            throw new \InvalidArgumentException(
+                'Cannot determine the position of the source stream. Pass $size explicitly for non-seekable streams.'
+            );
+        }
+
+        if (@\fseek($source, 0, \SEEK_END) !== 0) {
+            throw new \InvalidArgumentException(
+                'Source stream is not seekable. Pass $size explicitly for non-seekable streams.'
+            );
+        }
+
+        $endPosition = \ftell($source);
+
+        if ($endPosition === false) {
+            throw new \InvalidArgumentException(
+                'Cannot determine the size of the source stream. Pass $size explicitly for non-seekable streams.'
+            );
+        }
+
+        if (\fseek($source, $currentPosition, \SEEK_SET) !== 0) {
+            throw new \InvalidArgumentException('Cannot restore the position of the source stream after measuring its size.');
+        }
+
+        return [$source, $endPosition - $currentPosition];
     }
 }

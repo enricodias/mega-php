@@ -22,6 +22,7 @@ use Mega\Exception\ApiException;
 use Mega\Exception\CryptoException;
 use Mega\Exception\HttpException;
 use Mega\Service\NodeService;
+use Mega\Tests\Util\NonSeekableStream;
 use Mega\Transport\Connector;
 use Mega\Transport\Downloader;
 use Mega\Transport\Uploader;
@@ -591,7 +592,7 @@ class NodeServiceTest extends TestCase
             ->with(
                 $this->stringContains('default name'),
                 $this->callback(function (array $context) {
-                    return isset($context['name']) && \strpos($context['name'], 'upload_') === 0;
+                    return \array_key_exists('name', $context) && \strpos($context['name'], 'upload_') === 0;
                 })
             );
 
@@ -617,6 +618,73 @@ class NodeServiceTest extends TestCase
         $attrs = Attr::decrypt($attrCiphertext, $nodeKey);
 
         $this->assertStringStartsWith('upload_', $attrs['n']);
+    }
+
+    public function testUploadHonoursExplicitSizeForNonSeekableStream(): void
+    {
+        $plaintext = \str_repeat('G', 20);
+
+        \stream_wrapper_register('mega-test-nonseekable', NonSeekableStream::class);
+        NonSeekableStream::setContent($plaintext);
+
+        $stream = \fopen('mega-test-nonseekable://data', 'rb');
+
+        $capturedStream = null;
+        $capturedSize = null;
+
+        $uploader = $this->createMock(Uploader::class);
+        $uploader->method('upload')
+            ->willReturnCallback(function (string $url, $source, int $size) use (&$capturedStream, &$capturedSize) {
+                $capturedStream = $source;
+                $capturedSize = $size;
+                return 'tok';
+            });
+
+        $apiRequests = [];
+        $nodeCreateResponse = \json_encode([
+            ['f' => [['h' => 'explSzHd', 't' => Node::TYPE_FILE, 'k' => $this->encryptedRawKey($this->fileNodeKey()), 'a' => '']]],
+        ]);
+        $uploadUrlResponse = \json_encode([['p' => 'https://upload.example.invalid/']]);
+
+        $service = $this->makeServiceCapturingTwoApiRequests(
+            (string) $uploadUrlResponse,
+            (string) $nodeCreateResponse,
+            $apiRequests,
+            $uploader
+        );
+
+        try {
+            $service->upload($stream, 'parentHd', A32::toString($this->masterKey()), 'nonseekable.bin', \strlen($plaintext));
+        } finally {
+            \stream_wrapper_unregister('mega-test-nonseekable');
+        }
+
+        $this->assertSame(\strlen($plaintext), $capturedSize);
+        $this->assertSame($stream, $capturedStream, 'The original stream should be passed through unchanged.');
+        $this->assertSame($plaintext, \stream_get_contents($capturedStream));
+
+        $firstBody = \json_decode((string) $apiRequests[0]->getBody(), true);
+        $command = $firstBody[0];
+
+        $this->assertSame(\strlen($plaintext), $command['s']);
+    }
+
+    public function testUploadThrowsWhenStreamIsNotSeekableAndSizeIsOmitted(): void
+    {
+        \stream_wrapper_register('mega-test-nonseekable', NonSeekableStream::class);
+        NonSeekableStream::setContent('irrelevant content');
+
+        $stream = \fopen('mega-test-nonseekable://data', 'rb');
+        $service = $this->makeServiceCapturingApiRequests('[]');
+
+        try {
+            $this->expectException(\InvalidArgumentException::class);
+            $this->expectExceptionMessage('Pass $size explicitly for non-seekable streams.');
+
+            $service->upload($stream, 'parentHd', A32::toString($this->masterKey()), 'nonseekable.bin');
+        } finally {
+            \stream_wrapper_unregister('mega-test-nonseekable');
+        }
     }
 
     /**

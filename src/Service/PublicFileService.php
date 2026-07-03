@@ -61,7 +61,9 @@ class PublicFileService
     }
 
     /**
-     * Download a public file. Returns decrypted file content as a string when
+     * Download a public file.
+     * 
+     * Returns decrypted file content as a string when
      * $destination is null, or the number of bytes written when a writable
      * stream resource is given.
      *

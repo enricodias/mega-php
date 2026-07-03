@@ -177,7 +177,9 @@ class Client
     }
 
     /**
-     * Download a public file. Returns decrypted file content as a string when
+     * Download a public file.
+     * 
+     * Returns decrypted file content as a string when
      * $destination is null, or the number of bytes written when a writable
      * stream resource is given.
      *
@@ -241,9 +243,10 @@ class Client
     }
 
     /**
-     * Download an authenticated file. Returns decrypted file content as a
-     * string when $destination is null, or the number of bytes written when a
-     * writable stream resource is given.
+     * Download an authenticated file.
+     * 
+     * Returns decrypted file content as a string when $destination is null,
+     * or the number of bytes written when a writable stream resource is given.
      *
      * @param Node          $node
      * @param resource|null $destination
@@ -277,6 +280,7 @@ class Client
      * @param string|resource $source
      * @param string          $parentHandle
      * @param string|null     $name
+     * @param int|null        $size Total byte length of $source.
      *
      * @throws AuthException
      * @throws ApiException
@@ -284,7 +288,7 @@ class Client
      * @throws CryptoException
      * @throws \InvalidArgumentException
      */
-    public function uploadFile($source, string $parentHandle = '', ?string $name = null): Node
+    public function uploadFile($source, string $parentHandle = '', ?string $name = null, ?int $size = null): Node
     {
         $this->requireSession();
 
@@ -292,7 +296,7 @@ class Client
 
         $masterKeyStr = A32::toString($this->session->getMasterKey());
 
-        return $this->nodeService->upload($source, $parentHandle, $masterKeyStr, $name);
+        return $this->nodeService->upload($source, $parentHandle, $masterKeyStr, $name, $size);
     }
 
     /**

@@ -26,8 +26,8 @@ class FileInfo
 
     public function __construct(string $name, int $size, ?string $downloadUrl = null)
     {
-        $this->name        = $name;
-        $this->size        = $size;
+        $this->name = $name;
+        $this->size = $size;
         $this->downloadUrl = $downloadUrl;
     }
 

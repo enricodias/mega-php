@@ -42,10 +42,9 @@ class SessionCache
 
         if (
             !\is_array($data)
-            || !isset($data['masterKey'], $data['sessionId'], $data['privateKey'])
-            || !\is_array($data['masterKey'])
-            || !\is_string($data['sessionId'])
-            || !\is_array($data['privateKey'])
+            || !\array_key_exists('masterKey', $data) || !\is_array($data['masterKey'])
+            || !\array_key_exists('sessionId', $data) || !\is_string($data['sessionId'])
+            || !\array_key_exists('privateKey', $data) || !\is_array($data['privateKey'])
         ) {
             return null;
         }

@@ -531,6 +531,26 @@ class ClientTest extends TestCase
         $this->assertSame($node, $result);
     }
 
+    public function testUploadFilePassesExplicitSizeToNodeService(): void
+    {
+        $stream = \fopen('php://memory', 'rb+');
+        $masterKeyStr = A32::toString($this->masterKey());
+        $node = new Node('szHndl', Node::TYPE_FILE, 'file.bin', 'owner:key');
+
+        $nodeService = $this->createMock(NodeService::class);
+        $nodeService->expects($this->once())
+            ->method('upload')
+            ->with($stream, 'parentHd', $masterKeyStr, 'file.bin', 1024)
+            ->willReturn($node);
+
+        $client = $this->makeClient(null, null, $nodeService);
+        $client->restoreSession($this->session());
+
+        $result = $client->uploadFile($stream, 'parentHd', 'file.bin', 1024);
+
+        $this->assertSame($node, $result);
+    }
+
     public function testUploadFilePropagatesExceptionsFromService(): void
     {
         $stream = \fopen('php://memory', 'rb+');
